@@ -1,0 +1,51 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ecommerce-backend
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ecommerce_db
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+  cache:
+    type: redis
+    redis:
+      time-to-live: 300000   # 5 min par défaut
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:changeMeInProdWithAVeryLongRandomSecretKeyPlease123456789}
+    expiration-ms: 86400000   # 24h
+
+  pricing-service:
+    base-url: ${PRICING_SERVICE_URL:http://localhost:8000}
+    timeout-ms: 5000
+
+  pricing:
+    scheduler:
+      cron: "0 */15 * * * *"   # recalcul toutes les 15 min
+      enabled: true
+
+logging:
+  level:
+    com.ecommerce: DEBUG
+    org.springframework.security: INFO

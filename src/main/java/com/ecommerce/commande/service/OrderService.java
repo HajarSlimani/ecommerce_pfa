@@ -1,0 +1,141 @@
+package com.ecommerce.commande.service;
+
+import com.ecommerce.catalogue.entity.Product;
+import com.ecommerce.catalogue.entity.ProductUnit;
+import com.ecommerce.catalogue.repository.ProductRepository;
+import com.ecommerce.catalogue.repository.ProductUnitRepository;
+import com.ecommerce.commande.dto.OrderDTO;
+import com.ecommerce.commande.dto.OrderItemDTO;
+import com.ecommerce.commande.entity.Order;
+import com.ecommerce.commande.entity.OrderItem;
+import com.ecommerce.commande.repository.OrderRepository;
+import com.ecommerce.common.enums.OrderStatus;
+import com.ecommerce.common.enums.UnitStatus;
+import com.ecommerce.common.exception.ConflictException;
+import com.ecommerce.common.exception.ResourceNotFoundException;
+import com.ecommerce.panier.entity.Cart;
+import com.ecommerce.panier.entity.CartItem;
+import com.ecommerce.panier.repository.CartRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class OrderService {
+
+    private final CartRepository cartRepository;
+    private final ProductRepository productRepository;
+    private final ProductUnitRepository productUnitRepository;
+    private final OrderRepository orderRepository;
+
+    /**
+     * Transforme le panier de l'utilisateur en commande.
+     * L'assignation des unités précises (FIFO) se fait ICI, au moment de la
+     * commande, avec verrou pessimiste (voir ProductUnitRepository), pour
+     * éviter que deux clients se voient attribuer la même unité en cas de
+     * requêtes concurrentes sur un stock limité.
+     */
+    @Transactional
+    public OrderDTO checkout(Long userId) {
+        Cart cart = cartRepository.findByUserId(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Panier introuvable pour cet utilisateur"));
+
+        if (cart.getItems().isEmpty()) {
+            throw new ConflictException("Le panier est vide");
+        }
+
+        Order order = Order.builder()
+                .userId(userId)
+                .status(OrderStatus.PENDING)
+                .total(BigDecimal.ZERO)
+                .build();
+
+        List<OrderItem> orderItems = new ArrayList<>();
+        BigDecimal total = BigDecimal.ZERO;
+
+        for (CartItem cartItem : cart.getItems()) {
+            Product product = productRepository.findById(cartItem.getProductId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Produit introuvable : " + cartItem.getProductId()));
+
+            // Verrou pessimiste : bloque les lignes sélectionnées jusqu'à la fin
+            // de la transaction pour empêcher une autre commande concurrente
+            // de piocher dans les mêmes unités.
+            List<ProductUnit> candidates = productUnitRepository.findAvailableUnitsForUpdate(
+                    product.getId(), cartItem.getGrade());
+
+            if (candidates.size() < cartItem.getQuantity()) {
+                throw new ConflictException(
+                        "Stock insuffisant pour " + product.getName() + " (grade " + cartItem.getGrade() + ")");
+            }
+
+            List<ProductUnit> assigned = candidates.subList(0, cartItem.getQuantity());
+
+            for (ProductUnit unit : assigned) {
+                unit.setStatus(UnitStatus.SOLD);
+                unit.setSoldAt(Instant.now());
+                productUnitRepository.save(unit);
+
+                OrderItem orderItem = OrderItem.builder()
+                        .order(order)
+                        .productUnitId(unit.getId())
+                        .productId(product.getId())
+                        .productName(product.getName())
+                        .priceAtPurchase(unit.getCurrentPrice())
+                        .build();
+
+                orderItems.add(orderItem);
+                total = total.add(unit.getCurrentPrice());
+            }
+        }
+
+        order.setItems(orderItems);
+        order.setTotal(total);
+        order.setStatus(OrderStatus.CONFIRMED);
+        Order saved = orderRepository.save(order);
+
+        // Vider le panier une fois la commande confirmée
+        cart.getItems().clear();
+        cartRepository.save(cart);
+
+        return toDTO(saved);
+    }
+
+    @Transactional
+    public OrderDTO getOrder(Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Commande introuvable : " + orderId));
+        return toDTO(order);
+    }
+
+    @Transactional
+    public Page<OrderDTO> getOrdersForUser(Long userId, Pageable pageable) {
+        return orderRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable).map(this::toDTO);
+    }
+
+    private OrderDTO toDTO(Order order) {
+        List<OrderItemDTO> itemDTOs = order.getItems().stream()
+                .map(i -> OrderItemDTO.builder()
+                        .productId(i.getProductId())
+                        .productName(i.getProductName())
+                        .productUnitId(i.getProductUnitId())
+                        .priceAtPurchase(i.getPriceAtPurchase())
+                        .build())
+                .toList();
+
+        return OrderDTO.builder()
+                .id(order.getId())
+                .status(order.getStatus())
+                .total(order.getTotal())
+                .items(itemDTOs)
+                .createdAt(order.getCreatedAt())
+                .build();
+    }
+}
