@@ -43,7 +43,10 @@ app:
   pricing:
     scheduler:
       cron: "0 */15 * * * *"   # recalcul toutes les 15 min
-      enabled: true
+      enabled: false   # changed it here hs
+  
+  seed:
+    enabled: ${SEED_ENABLED:true} # changed it here hs
 
 logging:
   level:

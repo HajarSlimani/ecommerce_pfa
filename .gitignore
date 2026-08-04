@@ -6,3 +6,9 @@ target/
 .DS_Store
 *.log
 .env
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
