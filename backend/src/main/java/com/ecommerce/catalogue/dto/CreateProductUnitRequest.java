@@ -19,6 +19,9 @@ public class CreateProductUnitRequest {
     @NotNull
     private Grade grade;
 
+    @NotBlank
+    private String color;
+
     @NotNull
     @DecimalMin(value = "0.0", inclusive = false)
     private BigDecimal currentPrice;

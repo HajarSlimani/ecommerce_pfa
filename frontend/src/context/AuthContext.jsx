@@ -1,6 +1,7 @@
 import React, { createContext, useState, useCallback } from 'react'
 import { authApi } from '../api/authApi'
 import { decodeJwtPayload } from '../utils/jwt'
+import { clearGuestCartId } from '../utils/guestCart'
 
 export const AuthContext = createContext(null)
 
@@ -20,6 +21,9 @@ export function AuthProvider({ children }) {
     }
     localStorage.setItem('user', JSON.stringify(userData))
     setUser(userData)
+    // Le panier invité (s'il existait) vient d'être fusionné côté backend
+    // dans le panier du compte : plus besoin de l'id local.
+    clearGuestCartId()
   }
 
   const login = useCallback(async (credentials) => {

@@ -24,7 +24,7 @@ export default function AdminDashboardPage() {
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl">Vue d'ensemble</h1>
+        <h1 className="text-2xl">Vue d’ensemble</h1>
         <DateRangePicker from={range.from} to={range.to} onChange={setRange} />
       </div>
 

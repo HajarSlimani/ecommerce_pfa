@@ -42,7 +42,7 @@ export default function RevenueImpactChart({ historyEntries }) {
   if (data.length === 0) {
     return (
       <div className="flex h-72 items-center justify-center rounded-xl border border-surface-sunken bg-surface text-sm text-ink-soft">
-        Pas encore assez d'ajustements pour tracer une tendance.
+        Pas encore assez d’ajustements pour tracer une tendance.
       </div>
     )
   }
@@ -51,7 +51,7 @@ export default function RevenueImpactChart({ historyEntries }) {
     <div className="rounded-xl border border-surface-sunken bg-surface p-5">
       <h3 className="mb-1 font-display text-sm font-semibold">Impact revenu cumulé — dynamique vs statique</h3>
       <p className="mb-4 text-xs text-ink-soft">
-        Le scénario statique correspond à une absence d'ajustement de prix (référence à 0).
+        Le scénario statique correspond à une absence d’ajustement de prix (référence à 0).
       </p>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={data}>

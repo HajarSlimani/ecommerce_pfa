@@ -23,12 +23,13 @@ public class OrderController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<OrderDTO> getOrder(@PathVariable Long id) {
-        return ResponseEntity.ok(orderService.getOrder(id));
+    public ResponseEntity<OrderDTO> getOrder(@AuthenticationPrincipal UserPrincipal principal, @PathVariable Long id) {
+        return ResponseEntity.ok(orderService.getOrder(id, principal));
     }
 
     @GetMapping("/user/{userId}")
-    public ResponseEntity<Page<OrderDTO>> getOrdersForUser(@PathVariable Long userId, Pageable pageable) {
-        return ResponseEntity.ok(orderService.getOrdersForUser(userId, pageable));
+    public ResponseEntity<Page<OrderDTO>> getOrdersForUser(@AuthenticationPrincipal UserPrincipal principal,
+                                                            @PathVariable Long userId, Pageable pageable) {
+        return ResponseEntity.ok(orderService.getOrdersForUser(userId, principal, pageable));
     }
 }

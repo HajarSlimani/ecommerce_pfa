@@ -4,7 +4,7 @@ import toast from 'react-hot-toast'
 import { productApi } from '../../api/productApi'
 
 const GRADES = ['NEUF', 'A', 'B', 'C']
-const EMPTY_FORM = { serialNumber: '', grade: 'A', currentPrice: '' }
+const EMPTY_FORM = { serialNumber: '', grade: 'A', color: '', currentPrice: '' }
 
 export default function ProductUnitForm({ productId }) {
   const [form, setForm] = useState(EMPTY_FORM)
@@ -52,6 +52,13 @@ export default function ProductUnitForm({ productId }) {
           </option>
         ))}
       </select>
+      <input
+        required
+        placeholder="Couleur (ex: Noir, Bleu…)"
+        value={form.color}
+        onChange={(e) => setForm({ ...form, color: e.target.value })}
+        className="rounded-md border border-surface-sunken px-3 py-2 text-sm"
+      />
       <input
         required
         type="number"

@@ -10,15 +10,19 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class AuthController {
 
+    private static final String GUEST_HEADER = "X-Guest-Cart-Id";
+
     private final AuthService authService;
 
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
-        return ResponseEntity.ok(authService.register(request));
+    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request,
+                                                  @RequestHeader(value = GUEST_HEADER, required = false) String guestCartId) {
+        return ResponseEntity.ok(authService.register(request, guestCartId));
     }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-        return ResponseEntity.ok(authService.login(request));
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request,
+                                               @RequestHeader(value = GUEST_HEADER, required = false) String guestCartId) {
+        return ResponseEntity.ok(authService.login(request, guestCartId));
     }
 }

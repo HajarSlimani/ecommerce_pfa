@@ -4,7 +4,7 @@ import { formatCurrency } from '../../utils/formatCurrency'
 
 export default function PriceHistoryTable({ entries }) {
   if (!entries?.length) {
-    return <p className="py-8 text-center text-sm text-ink-soft">Aucun ajustement de prix pour l'instant.</p>
+    return <p className="py-8 text-center text-sm text-ink-soft">Aucun ajustement de prix pour l’instant.</p>
   }
 
   return (

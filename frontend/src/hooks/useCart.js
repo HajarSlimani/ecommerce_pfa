@@ -1,16 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { cartApi } from '../api/cartApi'
-import { useAuth } from './useAuth'
 
 export function useCart() {
-  const { isAuthenticated } = useAuth()
   const queryClient = useQueryClient()
 
+  // Le panier est accessible qu'on soit connecté (identifié par JWT) ou non
+  // (identifié par le header X-Guest-Cart-Id, voir api/axiosInstance.js) :
+  // pas de restriction "enabled" ici, sinon un visiteur perdrait son panier.
   const cartQuery = useQuery({
     queryKey: ['cart'],
     queryFn: cartApi.get,
-    enabled: isAuthenticated,
   })
 
   const addItemMutation = useMutation({

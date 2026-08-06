@@ -29,7 +29,7 @@ export default function OrderHistoryPage() {
       <h1 className="mb-6 text-2xl">Mes commandes</h1>
 
       {orders.length === 0 ? (
-        <p className="text-sm text-ink-soft">Aucune commande pour l'instant.</p>
+        <p className="text-sm text-ink-soft">Aucune commande pour l’instant.</p>
       ) : (
         <div className="flex flex-col gap-3">
           {orders.map((order) => (

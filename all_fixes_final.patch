@@ -1,0 +1,1622 @@
+diff --git a/backend/src/main/java/com/ecommerce/auth/AuthController.java b/backend/src/main/java/com/ecommerce/auth/AuthController.java
+index c0f8717..02ba78b 100644
+--- a/backend/src/main/java/com/ecommerce/auth/AuthController.java
++++ b/backend/src/main/java/com/ecommerce/auth/AuthController.java
+@@ -10,15 +10,19 @@ import org.springframework.web.bind.annotation.*;
+ @RequiredArgsConstructor
+ public class AuthController {
+ 
++    private static final String GUEST_HEADER = "X-Guest-Cart-Id";
++
+     private final AuthService authService;
+ 
+     @PostMapping("/register")
+-    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
+-        return ResponseEntity.ok(authService.register(request));
++    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request,
++                                                  @RequestHeader(value = GUEST_HEADER, required = false) String guestCartId) {
++        return ResponseEntity.ok(authService.register(request, guestCartId));
+     }
+ 
+     @PostMapping("/login")
+-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
+-        return ResponseEntity.ok(authService.login(request));
++    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request,
++                                               @RequestHeader(value = GUEST_HEADER, required = false) String guestCartId) {
++        return ResponseEntity.ok(authService.login(request, guestCartId));
+     }
+ }
+diff --git a/backend/src/main/java/com/ecommerce/auth/AuthService.java b/backend/src/main/java/com/ecommerce/auth/AuthService.java
+index 0272409..e600974 100644
+--- a/backend/src/main/java/com/ecommerce/auth/AuthService.java
++++ b/backend/src/main/java/com/ecommerce/auth/AuthService.java
+@@ -2,9 +2,9 @@ package com.ecommerce.auth;
+ 
+ import com.ecommerce.common.enums.Role;
+ import com.ecommerce.common.exception.BadRequestException;
++import com.ecommerce.panier.service.CartService;
+ import lombok.RequiredArgsConstructor;
+-import org.springframework.security.authentication.AuthenticationManager;
+-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
++import org.springframework.security.authentication.BadCredentialsException;
+ import org.springframework.security.crypto.password.PasswordEncoder;
+ import org.springframework.stereotype.Service;
+ 
+@@ -15,9 +15,9 @@ public class AuthService {
+     private final UserRepository userRepository;
+     private final PasswordEncoder passwordEncoder;
+     private final JwtService jwtService;
+-    private final AuthenticationManager authenticationManager;
++    private final CartService cartService;
+ 
+-    public AuthResponse register(RegisterRequest request) {
++    public AuthResponse register(RegisterRequest request, String guestCartId) {
+         if (userRepository.existsByEmail(request.getEmail())) {
+             throw new BadRequestException("Un compte existe déjà avec cet email");
+         }
+@@ -30,18 +30,28 @@ public class AuthService {
+                 .build();
+ 
+         userRepository.save(user);
++        cartService.mergeGuestCartIntoUser(guestCartId, user.getId());
+ 
+         String token = jwtService.generateToken(new UserPrincipal(user));
+         return new AuthResponse(token, user.getEmail(), user.getRole().name());
+     }
+ 
+-    public AuthResponse login(LoginRequest request) {
+-        authenticationManager.authenticate(
+-                new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword())
+-        );
+-
++    /**
++     * Vérification directe du mot de passe (plutôt que de passer par
++     * AuthenticationManager/DaoAuthenticationProvider) : plus simple, plus
++     * prévisible, et évite les subtilités de câblage Spring Security autour
++     * du AuthenticationManagerBuilder global vs celui de HttpSecurity —
++     * inutiles de toute façon pour une API stateless en JWT.
++     */
++    public AuthResponse login(LoginRequest request, String guestCartId) {
+         User user = userRepository.findByEmail(request.getEmail())
+-                .orElseThrow(() -> new BadRequestException("Identifiants invalides"));
++                .orElseThrow(() -> new BadCredentialsException("Email ou mot de passe incorrect"));
++
++        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
++            throw new BadCredentialsException("Email ou mot de passe incorrect");
++        }
++
++        cartService.mergeGuestCartIntoUser(guestCartId, user.getId());
+ 
+         String token = jwtService.generateToken(new UserPrincipal(user));
+         return new AuthResponse(token, user.getEmail(), user.getRole().name());
+diff --git a/backend/src/main/java/com/ecommerce/auth/JwtAuthFilter.java b/backend/src/main/java/com/ecommerce/auth/JwtAuthFilter.java
+index 4f90533..dfb5717 100644
+--- a/backend/src/main/java/com/ecommerce/auth/JwtAuthFilter.java
++++ b/backend/src/main/java/com/ecommerce/auth/JwtAuthFilter.java
+@@ -1,21 +1,25 @@
+ package com.ecommerce.auth;
+ 
++import io.jsonwebtoken.JwtException;
+ import jakarta.servlet.FilterChain;
+ import jakarta.servlet.ServletException;
+ import jakarta.servlet.http.HttpServletRequest;
+ import jakarta.servlet.http.HttpServletResponse;
+ import lombok.RequiredArgsConstructor;
++import lombok.extern.slf4j.Slf4j;
+ import org.springframework.lang.NonNull;
+ import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+ import org.springframework.security.core.context.SecurityContextHolder;
+ import org.springframework.security.core.userdetails.UserDetails;
+ import org.springframework.security.core.userdetails.UserDetailsService;
++import org.springframework.security.core.userdetails.UsernameNotFoundException;
+ import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+ import org.springframework.stereotype.Component;
+ import org.springframework.web.filter.OncePerRequestFilter;
+ 
+ import java.io.IOException;
+ 
++@Slf4j
+ @Component
+ @RequiredArgsConstructor
+ public class JwtAuthFilter extends OncePerRequestFilter {
+@@ -36,17 +40,26 @@ public class JwtAuthFilter extends OncePerRequestFilter {
+         }
+ 
+         String jwt = authHeader.substring(7);
+-        String userEmail = jwtService.extractUsername(jwt);
+ 
+-        if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+-            UserDetails userDetails = userDetailsService.loadUserByUsername(userEmail);
++        try {
++            String userEmail = jwtService.extractUsername(jwt);
+ 
+-            if (jwtService.isTokenValid(jwt, userDetails)) {
+-                UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+-                        userDetails, null, userDetails.getAuthorities());
+-                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+-                SecurityContextHolder.getContext().setAuthentication(authToken);
++            if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
++                UserDetails userDetails = userDetailsService.loadUserByUsername(userEmail);
++
++                if (jwtService.isTokenValid(jwt, userDetails)) {
++                    UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
++                            userDetails, null, userDetails.getAuthorities());
++                    authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
++                    SecurityContextHolder.getContext().setAuthentication(authToken);
++                }
+             }
++        } catch (JwtException | IllegalArgumentException | UsernameNotFoundException ex) {
++            // Token expiré, malformé, signature invalide, ou utilisateur supprimé :
++            // on traite la requête comme anonyme au lieu de laisser l'exception casser
++            // toute la requête (y compris les endpoints publics comme /api/products).
++            log.debug("Token JWT invalide ignoré : {}", ex.getMessage());
++            SecurityContextHolder.clearContext();
+         }
+ 
+         filterChain.doFilter(request, response);
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java b/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java
+index 4d25e6e..24026df 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java
+@@ -4,9 +4,9 @@ import com.ecommerce.catalogue.dto.CreateProductRequest;
+ import com.ecommerce.catalogue.dto.ProductDTO;
+ import com.ecommerce.catalogue.dto.ProductDetailDTO;
+ import com.ecommerce.catalogue.service.ProductService;
++import com.ecommerce.common.dto.PageResponse;
+ import jakarta.validation.Valid;
+ import lombok.RequiredArgsConstructor;
+-import org.springframework.data.domain.Page;
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.http.ResponseEntity;
+ import org.springframework.security.access.prepost.PreAuthorize;
+@@ -20,7 +20,7 @@ public class ProductController {
+     private final ProductService productService;
+ 
+     @GetMapping
+-    public ResponseEntity<Page<ProductDTO>> list(
++    public ResponseEntity<PageResponse<ProductDTO>> list(
+             @RequestParam(required = false) String category,
+             Pageable pageable) {
+         return ResponseEntity.ok(productService.listProducts(category, pageable));
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/dto/CreateProductUnitRequest.java b/backend/src/main/java/com/ecommerce/catalogue/dto/CreateProductUnitRequest.java
+index af98e76..a591463 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/dto/CreateProductUnitRequest.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/dto/CreateProductUnitRequest.java
+@@ -19,6 +19,9 @@ public class CreateProductUnitRequest {
+     @NotNull
+     private Grade grade;
+ 
++    @NotBlank
++    private String color;
++
+     @NotNull
+     @DecimalMin(value = "0.0", inclusive = false)
+     private BigDecimal currentPrice;
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDTO.java b/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDTO.java
+index 1f01353..cb4624f 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDTO.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDTO.java
+@@ -3,8 +3,20 @@ package com.ecommerce.catalogue.dto;
+ import lombok.AllArgsConstructor;
+ import lombok.Builder;
+ import lombok.Getter;
++import lombok.NoArgsConstructor;
++import lombok.Setter;
+ 
++/**
++ * @NoArgsConstructor + @Setter sont nécessaires même si le code applicatif
++ * n'utilise que le @Builder : ce DTO est mis en cache dans Redis via Jackson
++ * (GenericJackson2JsonRedisSerializer), qui a besoin d'un constructeur par
++ * défaut + de setters pour RECONSTRUIRE l'objet à la lecture du cache.
++ * Sans ça, l'écriture en cache fonctionne (via les getters) mais la lecture
++ * échoue avec une exception de désérialisation.
++ */
+ @Getter
++@Setter
++@NoArgsConstructor
+ @Builder
+ @AllArgsConstructor
+ public class ProductDTO {
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDetailDTO.java b/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDetailDTO.java
+index e9b9dbc..0c823cf 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDetailDTO.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDetailDTO.java
+@@ -3,10 +3,14 @@ package com.ecommerce.catalogue.dto;
+ import lombok.AllArgsConstructor;
+ import lombok.Builder;
+ import lombok.Getter;
++import lombok.NoArgsConstructor;
++import lombok.Setter;
+ 
+ import java.util.List;
+ 
+ @Getter
++@Setter
++@NoArgsConstructor
+ @Builder
+ @AllArgsConstructor
+ public class ProductDetailDTO {
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/dto/VariantDTO.java b/backend/src/main/java/com/ecommerce/catalogue/dto/VariantDTO.java
+index b682e77..8985ba8 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/dto/VariantDTO.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/dto/VariantDTO.java
+@@ -4,19 +4,24 @@ import com.ecommerce.common.enums.Grade;
+ import lombok.AllArgsConstructor;
+ import lombok.Builder;
+ import lombok.Getter;
++import lombok.NoArgsConstructor;
++import lombok.Setter;
+ 
+ import java.math.BigDecimal;
+ 
+ /**
+- * Représente une "variante" achetable = un (Product, grade) avec son prix
+- * courant et son stock disponible. C'est ce que le front affiche comme
+- * sélecteur de grade sur la fiche produit.
++ * Représente une "variante" achetable = un (Product, grade, couleur) avec
++ * son prix courant et son stock disponible. C'est ce que le front affiche
++ * comme sélecteur sur la fiche produit.
+  */
+ @Getter
++@Setter
++@NoArgsConstructor
+ @Builder
+ @AllArgsConstructor
+ public class VariantDTO {
+     private Grade grade;
++    private String color;
+     private BigDecimal currentPrice;
+     private long availableStock;
+ }
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/entity/ProductUnit.java b/backend/src/main/java/com/ecommerce/catalogue/entity/ProductUnit.java
+index 120eae5..caeba2e 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/entity/ProductUnit.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/entity/ProductUnit.java
+@@ -10,13 +10,14 @@ import java.time.Instant;
+ 
+ /**
+  * Unité physique d'un produit (ex: un iPhone précis identifié par son numéro de série).
+- * C'est la classe centrale pour la logique de stock et de pricing par grade :
+- * un même Product peut avoir plusieurs ProductUnit de grades différents,
+- * chacune avec son propre prix courant et son propre statut.
++ * C'est la classe centrale pour la logique de stock : un même Product peut
++ * avoir plusieurs ProductUnit de grades ET de couleurs différentes. Le prix,
++ * lui, reste piloté par grade uniquement (pas par couleur) : les unités de
++ * même grade partagent le même currentPrice quelle que soit leur couleur.
+  */
+ @Entity
+ @Table(name = "product_units", indexes = {
+-        @Index(name = "idx_unit_product_grade_status", columnList = "product_id, grade, status")
++        @Index(name = "idx_unit_product_grade_color_status", columnList = "product_id, grade, color, status")
+ })
+ @Getter
+ @Setter
+@@ -40,6 +41,9 @@ public class ProductUnit {
+     @Column(nullable = false)
+     private Grade grade;
+ 
++    @Column(nullable = false)
++    private String color;
++
+     @Enumerated(EnumType.STRING)
+     @Column(nullable = false)
+     @Builder.Default
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/repository/ProductUnitRepository.java b/backend/src/main/java/com/ecommerce/catalogue/repository/ProductUnitRepository.java
+index 84e4a4c..5dafd07 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/repository/ProductUnitRepository.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/repository/ProductUnitRepository.java
+@@ -13,29 +13,53 @@ import java.util.List;
+ 
+ public interface ProductUnitRepository extends JpaRepository<ProductUnit, Long> {
+ 
++    long countByProductIdAndGradeAndColorAndStatus(Long productId, Grade grade, String color, UnitStatus status);
++
++    /**
++     * Comptage par grade seul (toutes couleurs confondues) : utilisé par le
++     * moteur de pricing, qui raisonne au niveau (produit, grade) et pas par
++     * couleur (voir la note dans ProductUnit).
++     */
+     long countByProductIdAndGradeAndStatus(Long productId, Grade grade, UnitStatus status);
+ 
+     List<ProductUnit> findByProductIdAndStatus(Long productId, UnitStatus status);
+ 
+     /**
+      * Sélectionne les N unités disponibles les plus anciennes (FIFO) pour un
+-     * produit + grade donné, avec verrou pessimiste pour éviter la survente
+-     * en cas de commandes concurrentes sur le même stock.
++     * produit + grade + couleur donnés, avec verrou pessimiste pour éviter la
++     * survente en cas de commandes concurrentes sur le même stock.
+      */
+     @Lock(LockModeType.PESSIMISTIC_WRITE)
+     @Query("""
+             SELECT u FROM ProductUnit u
+             WHERE u.product.id = :productId
+               AND u.grade = :grade
++              AND u.color = :color
+               AND u.status = 'AVAILABLE'
+             ORDER BY u.enteredStockAt ASC
+             """)
+     List<ProductUnit> findAvailableUnitsForUpdate(@Param("productId") Long productId,
+-                                                    @Param("grade") Grade grade);
++                                                    @Param("grade") Grade grade,
++                                                    @Param("color") String color);
+ 
+     @Query("""
+             SELECT DISTINCT u.grade FROM ProductUnit u
+             WHERE u.product.id = :productId AND u.status = 'AVAILABLE'
+             """)
+     List<Grade> findAvailableGrades(@Param("productId") Long productId);
++
++    /**
++     * Toutes les combinaisons (grade, couleur) actuellement disponibles pour
++     * un produit — c'est ce qui alimente le sélecteur de variante côté front.
++     */
++    @Query("""
++            SELECT DISTINCT u.grade as grade, u.color as color FROM ProductUnit u
++            WHERE u.product.id = :productId AND u.status = 'AVAILABLE'
++            """)
++    List<GradeColorProjection> findAvailableVariantCombos(@Param("productId") Long productId);
++
++    interface GradeColorProjection {
++        Grade getGrade();
++        String getColor();
++    }
+ }
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java b/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
+index 1f41d94..1506dd2 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
+@@ -4,6 +4,7 @@ import com.ecommerce.catalogue.dto.*;
+ import com.ecommerce.catalogue.entity.Product;
+ import com.ecommerce.catalogue.repository.ProductRepository;
+ import com.ecommerce.catalogue.repository.ProductUnitRepository;
++import com.ecommerce.common.dto.PageResponse;
+ import com.ecommerce.common.enums.Grade;
+ import com.ecommerce.common.enums.UnitStatus;
+ import com.ecommerce.common.exception.ResourceNotFoundException;
+@@ -23,16 +24,24 @@ public class ProductService {
+     private final ProductRepository productRepository;
+     private final ProductUnitRepository productUnitRepository;
+ 
++    /**
++     * Retourne PageResponse (DTO maison) plutôt que Page/PageImpl de Spring
++     * Data : PageImpl n'a pas de constructeur par défaut et n'est pas
++     * fiablement désérialisable par Jackson, ce qui casse la lecture du
++     * cache Redis dès la 2e requête (la 1re, en cache MISS, fonctionne
++     * puisqu'elle ne désérialise rien).
++     */
+     @Cacheable(value = "products", key = "#pageable.pageNumber + '-' + #pageable.pageSize + '-' + #category")
+-    public Page<ProductDTO> listProducts(String category, Pageable pageable) {
++    public PageResponse<ProductDTO> listProducts(String category, Pageable pageable) {
+         Page<Product> page = (category == null || category.isBlank())
+                 ? productRepository.findAll(pageable)
+                 : productRepository.findByCategory(category, pageable);
+-        return page.map(this::toDTO);
++        return PageResponse.from(page, this::toDTO);
+     }
+ 
+     /**
+-     * Fiche produit détaillée + variantes disponibles (une par grade en stock).
++     * Fiche produit détaillée + variantes disponibles (une par combinaison
++     * grade+couleur en stock).
+      * Cache court (2 min) car le stock/prix change fréquemment avec le pricing dynamique.
+      */
+     @Cacheable(value = "productVariants", key = "#productId")
+@@ -40,10 +49,8 @@ public class ProductService {
+         Product product = productRepository.findById(productId)
+                 .orElseThrow(() -> new ResourceNotFoundException("Produit introuvable : " + productId));
+ 
+-        List<Grade> availableGrades = productUnitRepository.findAvailableGrades(productId);
+-
+-        List<VariantDTO> variants = availableGrades.stream()
+-                .map(grade -> buildVariant(productId, grade))
++        List<VariantDTO> variants = productUnitRepository.findAvailableVariantCombos(productId).stream()
++                .map(combo -> buildVariant(productId, combo.getGrade(), combo.getColor()))
+                 .toList();
+ 
+         return ProductDetailDTO.builder()
+@@ -52,18 +59,20 @@ public class ProductService {
+                 .build();
+     }
+ 
+-    private VariantDTO buildVariant(Long productId, Grade grade) {
+-        long stock = productUnitRepository.countByProductIdAndGradeAndStatus(productId, grade, UnitStatus.AVAILABLE);
++    private VariantDTO buildVariant(Long productId, Grade grade, String color) {
++        long stock = productUnitRepository.countByProductIdAndGradeAndColorAndStatus(
++                productId, grade, color, UnitStatus.AVAILABLE);
+ 
+         var units = productUnitRepository.findByProductIdAndStatus(productId, UnitStatus.AVAILABLE)
+                 .stream()
+-                .filter(u -> u.getGrade() == grade)
++                .filter(u -> u.getGrade() == grade && u.getColor().equals(color))
+                 .toList();
+ 
+         var currentPrice = units.isEmpty() ? null : units.get(0).getCurrentPrice();
+ 
+         return VariantDTO.builder()
+                 .grade(grade)
++                .color(color)
+                 .currentPrice(currentPrice)
+                 .availableStock(stock)
+                 .build();
+@@ -91,6 +100,7 @@ public class ProductService {
+                 .product(product)
+                 .serialNumber(request.getSerialNumber())
+                 .grade(request.getGrade())
++                .color(request.getColor())
+                 .status(UnitStatus.AVAILABLE)
+                 .currentPrice(request.getCurrentPrice())
+                 .build();
+diff --git a/backend/src/main/java/com/ecommerce/commande/controller/OrderController.java b/backend/src/main/java/com/ecommerce/commande/controller/OrderController.java
+index a1e46c6..92d7e60 100644
+--- a/backend/src/main/java/com/ecommerce/commande/controller/OrderController.java
++++ b/backend/src/main/java/com/ecommerce/commande/controller/OrderController.java
+@@ -23,12 +23,13 @@ public class OrderController {
+     }
+ 
+     @GetMapping("/{id}")
+-    public ResponseEntity<OrderDTO> getOrder(@PathVariable Long id) {
+-        return ResponseEntity.ok(orderService.getOrder(id));
++    public ResponseEntity<OrderDTO> getOrder(@AuthenticationPrincipal UserPrincipal principal, @PathVariable Long id) {
++        return ResponseEntity.ok(orderService.getOrder(id, principal));
+     }
+ 
+     @GetMapping("/user/{userId}")
+-    public ResponseEntity<Page<OrderDTO>> getOrdersForUser(@PathVariable Long userId, Pageable pageable) {
+-        return ResponseEntity.ok(orderService.getOrdersForUser(userId, pageable));
++    public ResponseEntity<Page<OrderDTO>> getOrdersForUser(@AuthenticationPrincipal UserPrincipal principal,
++                                                            @PathVariable Long userId, Pageable pageable) {
++        return ResponseEntity.ok(orderService.getOrdersForUser(userId, principal, pageable));
+     }
+ }
+diff --git a/backend/src/main/java/com/ecommerce/commande/service/OrderService.java b/backend/src/main/java/com/ecommerce/commande/service/OrderService.java
+index e4fa85c..feac4ed 100644
+--- a/backend/src/main/java/com/ecommerce/commande/service/OrderService.java
++++ b/backend/src/main/java/com/ecommerce/commande/service/OrderService.java
+@@ -1,5 +1,6 @@
+ package com.ecommerce.commande.service;
+ 
++import com.ecommerce.auth.UserPrincipal;
+ import com.ecommerce.catalogue.entity.Product;
+ import com.ecommerce.catalogue.entity.ProductUnit;
+ import com.ecommerce.catalogue.repository.ProductRepository;
+@@ -10,6 +11,7 @@ import com.ecommerce.commande.entity.Order;
+ import com.ecommerce.commande.entity.OrderItem;
+ import com.ecommerce.commande.repository.OrderRepository;
+ import com.ecommerce.common.enums.OrderStatus;
++import com.ecommerce.common.enums.Role;
+ import com.ecommerce.common.enums.UnitStatus;
+ import com.ecommerce.common.exception.ConflictException;
+ import com.ecommerce.common.exception.ResourceNotFoundException;
+@@ -17,15 +19,20 @@ import com.ecommerce.panier.entity.Cart;
+ import com.ecommerce.panier.entity.CartItem;
+ import com.ecommerce.panier.repository.CartRepository;
+ import lombok.RequiredArgsConstructor;
++import org.springframework.cache.Cache;
++import org.springframework.cache.CacheManager;
+ import org.springframework.data.domain.Page;
+ import org.springframework.data.domain.Pageable;
++import org.springframework.security.access.AccessDeniedException;
+ import org.springframework.stereotype.Service;
+ import org.springframework.transaction.annotation.Transactional;
+ 
+ import java.math.BigDecimal;
+ import java.time.Instant;
+ import java.util.ArrayList;
++import java.util.HashSet;
+ import java.util.List;
++import java.util.Set;
+ 
+ @Service
+ @RequiredArgsConstructor
+@@ -35,6 +42,7 @@ public class OrderService {
+     private final ProductRepository productRepository;
+     private final ProductUnitRepository productUnitRepository;
+     private final OrderRepository orderRepository;
++    private final CacheManager cacheManager;
+ 
+     /**
+      * Transforme le panier de l'utilisateur en commande.
+@@ -60,6 +68,7 @@ public class OrderService {
+ 
+         List<OrderItem> orderItems = new ArrayList<>();
+         BigDecimal total = BigDecimal.ZERO;
++        Set<Long> affectedProductIds = new HashSet<>();
+ 
+         for (CartItem cartItem : cart.getItems()) {
+             Product product = productRepository.findById(cartItem.getProductId())
+@@ -69,11 +78,12 @@ public class OrderService {
+             // de la transaction pour empêcher une autre commande concurrente
+             // de piocher dans les mêmes unités.
+             List<ProductUnit> candidates = productUnitRepository.findAvailableUnitsForUpdate(
+-                    product.getId(), cartItem.getGrade());
++                    product.getId(), cartItem.getGrade(), cartItem.getColor());
+ 
+             if (candidates.size() < cartItem.getQuantity()) {
+                 throw new ConflictException(
+-                        "Stock insuffisant pour " + product.getName() + " (grade " + cartItem.getGrade() + ")");
++                        "Stock insuffisant pour " + product.getName() + " (grade " + cartItem.getGrade()
++                                + ", couleur " + cartItem.getColor() + ")");
+             }
+ 
+             List<ProductUnit> assigned = candidates.subList(0, cartItem.getQuantity());
+@@ -94,6 +104,8 @@ public class OrderService {
+                 orderItems.add(orderItem);
+                 total = total.add(unit.getCurrentPrice());
+             }
++
++            affectedProductIds.add(product.getId());
+         }
+ 
+         order.setItems(orderItems);
+@@ -105,21 +117,52 @@ public class OrderService {
+         cart.getItems().clear();
+         cartRepository.save(cart);
+ 
++        // Le stock vient de changer (unités passées à SOLD) : sans ça, la fiche
++        // produit continuerait d'afficher l'ancien stock jusqu'à expiration du
++        // TTL du cache Redis (jusqu'à 2 min), alors que la vente vient d'avoir lieu.
++        evictProductVariantsCache(affectedProductIds);
++
+         return toDTO(saved);
+     }
+ 
+     @Transactional
+-    public OrderDTO getOrder(Long orderId) {
++    public OrderDTO getOrder(Long orderId, UserPrincipal principal) {
+         Order order = orderRepository.findById(orderId)
+                 .orElseThrow(() -> new ResourceNotFoundException("Commande introuvable : " + orderId));
++
++        assertOwnerOrAdmin(order.getUserId(), principal);
++
+         return toDTO(order);
+     }
+ 
+     @Transactional
+-    public Page<OrderDTO> getOrdersForUser(Long userId, Pageable pageable) {
++    public Page<OrderDTO> getOrdersForUser(Long userId, UserPrincipal principal, Pageable pageable) {
++        assertOwnerOrAdmin(userId, principal);
++
+         return orderRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable).map(this::toDTO);
+     }
+ 
++    /**
++     * Empêche un utilisateur de consulter la commande / l'historique d'un
++     * autre utilisateur simplement en changeant l'id dans l'URL (faille IDOR).
++     * Les ADMIN peuvent tout consulter.
++     */
++    private void assertOwnerOrAdmin(Long resourceOwnerUserId, UserPrincipal principal) {
++        boolean isOwner = principal.getId().equals(resourceOwnerUserId);
++        boolean isAdmin = principal.getUser().getRole() == Role.ADMIN;
++
++        if (!isOwner && !isAdmin) {
++            throw new AccessDeniedException("Vous n'avez pas accès à cette ressource");
++        }
++    }
++
++    private void evictProductVariantsCache(Set<Long> productIds) {
++        Cache cache = cacheManager.getCache("productVariants");
++        if (cache != null) {
++            productIds.forEach(cache::evict);
++        }
++    }
++
+     private OrderDTO toDTO(Order order) {
+         List<OrderItemDTO> itemDTOs = order.getItems().stream()
+                 .map(i -> OrderItemDTO.builder()
+diff --git a/backend/src/main/java/com/ecommerce/common/dto/PageResponse.java b/backend/src/main/java/com/ecommerce/common/dto/PageResponse.java
+new file mode 100644
+index 0000000..3baf9b9
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/common/dto/PageResponse.java
+@@ -0,0 +1,43 @@
++package com.ecommerce.common.dto;
++
++import lombok.AllArgsConstructor;
++import lombok.Builder;
++import lombok.Getter;
++import lombok.NoArgsConstructor;
++import lombok.Setter;
++import org.springframework.data.domain.Page;
++
++import java.util.List;
++import java.util.function.Function;
++
++/**
++ * Remplace Page<T>/PageImpl<T> de Spring Data comme type de retour d'API et
++ * comme type mis en cache. PageImpl n'a pas de constructeur par défaut et
++ * n'est pas fiablement désérialisable par Jackson (donc pas cache-friendly
++ * avec Redis) — ce DTO simple l'est.
++ *
++ * Champs alignés sur ceux d'une Page Spring Data pour que le frontend
++ * n'ait rien à changer (content, totalPages, totalElements).
++ */
++@Getter
++@Setter
++@NoArgsConstructor
++@AllArgsConstructor
++@Builder
++public class PageResponse<T> {
++    private List<T> content;
++    private int page;
++    private int size;
++    private long totalElements;
++    private int totalPages;
++
++    public static <S, T> PageResponse<T> from(Page<S> springPage, Function<S, T> mapper) {
++        return PageResponse.<T>builder()
++                .content(springPage.getContent().stream().map(mapper).toList())
++                .page(springPage.getNumber())
++                .size(springPage.getSize())
++                .totalElements(springPage.getTotalElements())
++                .totalPages(springPage.getTotalPages())
++                .build();
++    }
++}
+diff --git a/backend/src/main/java/com/ecommerce/common/exception/GlobalExceptionHandler.java b/backend/src/main/java/com/ecommerce/common/exception/GlobalExceptionHandler.java
+index 1be947d..7d49b91 100644
+--- a/backend/src/main/java/com/ecommerce/common/exception/GlobalExceptionHandler.java
++++ b/backend/src/main/java/com/ecommerce/common/exception/GlobalExceptionHandler.java
+@@ -3,6 +3,7 @@ package com.ecommerce.common.exception;
+ import jakarta.servlet.http.HttpServletRequest;
+ import org.springframework.http.HttpStatus;
+ import org.springframework.http.ResponseEntity;
++import org.springframework.security.access.AccessDeniedException;
+ import org.springframework.security.authentication.BadCredentialsException;
+ import org.springframework.web.bind.MethodArgumentNotValidException;
+ import org.springframework.web.bind.annotation.ExceptionHandler;
+@@ -34,6 +35,11 @@ public class GlobalExceptionHandler {
+         return build(HttpStatus.UNAUTHORIZED, "Email ou mot de passe incorrect", req);
+     }
+ 
++    @ExceptionHandler(AccessDeniedException.class)
++    public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex, HttpServletRequest req) {
++        return build(HttpStatus.FORBIDDEN, "Accès refusé : cette ressource ne vous appartient pas", req);
++    }
++
+     @ExceptionHandler(MethodArgumentNotValidException.class)
+     public ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException ex, HttpServletRequest req) {
+         String message = ex.getBindingResult().getFieldErrors().stream()
+diff --git a/backend/src/main/java/com/ecommerce/config/SecurityConfig.java b/backend/src/main/java/com/ecommerce/config/SecurityConfig.java
+index 6d2cd1a..81de678 100644
+--- a/backend/src/main/java/com/ecommerce/config/SecurityConfig.java
++++ b/backend/src/main/java/com/ecommerce/config/SecurityConfig.java
+@@ -42,6 +42,7 @@ public class SecurityConfig {
+             .authorizeHttpRequests(auth -> auth
+                     .requestMatchers("/api/auth/**").permitAll()
+                     .requestMatchers("/api/products/**").permitAll()
++                    .requestMatchers("/api/cart/**").permitAll()
+                     .requestMatchers(
+                             "/swagger-ui/**",
+                             "/swagger-ui.html",
+diff --git a/backend/src/main/java/com/ecommerce/panier/controller/CartController.java b/backend/src/main/java/com/ecommerce/panier/controller/CartController.java
+index a54db6a..b2e7f5c 100644
+--- a/backend/src/main/java/com/ecommerce/panier/controller/CartController.java
++++ b/backend/src/main/java/com/ecommerce/panier/controller/CartController.java
+@@ -10,27 +10,43 @@ import org.springframework.http.ResponseEntity;
+ import org.springframework.security.core.annotation.AuthenticationPrincipal;
+ import org.springframework.web.bind.annotation.*;
+ 
++/**
++ * Accessible sans authentification (voir SecurityConfig, /api/cart/** est
++ * permitAll) : un visiteur non connecté peut avoir un panier identifié par
++ * le header X-Guest-Cart-Id (UUID généré côté navigateur), pour ne pas le
++ * perdre avant de créer un compte. Si l'utilisateur EST connecté, son userId
++ * (extrait du JWT) prime toujours sur le guestId.
++ */
+ @RestController
+ @RequestMapping("/api/cart")
+ @RequiredArgsConstructor
+ public class CartController {
+ 
++    private static final String GUEST_HEADER = "X-Guest-Cart-Id";
++
+     private final CartService cartService;
+ 
+     @GetMapping
+-    public ResponseEntity<CartDTO> getCart(@AuthenticationPrincipal UserPrincipal principal) {
+-        return ResponseEntity.ok(cartService.getCart(principal.getId()));
++    public ResponseEntity<CartDTO> getCart(@AuthenticationPrincipal UserPrincipal principal,
++                                            @RequestHeader(value = GUEST_HEADER, required = false) String guestId) {
++        return ResponseEntity.ok(cartService.getCart(userIdOf(principal), guestId));
+     }
+ 
+     @PostMapping("/items")
+     public ResponseEntity<CartDTO> addItem(@AuthenticationPrincipal UserPrincipal principal,
++                                            @RequestHeader(value = GUEST_HEADER, required = false) String guestId,
+                                             @Valid @RequestBody AddCartItemRequest request) {
+-        return ResponseEntity.ok(cartService.addItem(principal.getId(), request));
++        return ResponseEntity.ok(cartService.addItem(userIdOf(principal), guestId, request));
+     }
+ 
+     @DeleteMapping("/items/{itemId}")
+     public ResponseEntity<CartDTO> removeItem(@AuthenticationPrincipal UserPrincipal principal,
++                                               @RequestHeader(value = GUEST_HEADER, required = false) String guestId,
+                                                @PathVariable Long itemId) {
+-        return ResponseEntity.ok(cartService.removeItem(principal.getId(), itemId));
++        return ResponseEntity.ok(cartService.removeItem(userIdOf(principal), guestId, itemId));
++    }
++
++    private Long userIdOf(UserPrincipal principal) {
++        return principal != null ? principal.getId() : null;
+     }
+ }
+diff --git a/backend/src/main/java/com/ecommerce/panier/dto/AddCartItemRequest.java b/backend/src/main/java/com/ecommerce/panier/dto/AddCartItemRequest.java
+index 87f9aa1..0a2ff80 100644
+--- a/backend/src/main/java/com/ecommerce/panier/dto/AddCartItemRequest.java
++++ b/backend/src/main/java/com/ecommerce/panier/dto/AddCartItemRequest.java
+@@ -2,6 +2,7 @@ package com.ecommerce.panier.dto;
+ 
+ import com.ecommerce.common.enums.Grade;
+ import jakarta.validation.constraints.Min;
++import jakarta.validation.constraints.NotBlank;
+ import jakarta.validation.constraints.NotNull;
+ import lombok.Getter;
+ import lombok.Setter;
+@@ -16,6 +17,9 @@ public class AddCartItemRequest {
+     @NotNull
+     private Grade grade;
+ 
++    @NotBlank
++    private String color;
++
+     @Min(1)
+     private int quantity;
+ }
+diff --git a/backend/src/main/java/com/ecommerce/panier/dto/CartItemDTO.java b/backend/src/main/java/com/ecommerce/panier/dto/CartItemDTO.java
+index 13fdf74..9554476 100644
+--- a/backend/src/main/java/com/ecommerce/panier/dto/CartItemDTO.java
++++ b/backend/src/main/java/com/ecommerce/panier/dto/CartItemDTO.java
+@@ -15,6 +15,7 @@ public class CartItemDTO {
+     private Long productId;
+     private String productName;
+     private Grade grade;
++    private String color;
+     private int quantity;
+     private BigDecimal unitPrice;
+     private BigDecimal subtotal;
+diff --git a/backend/src/main/java/com/ecommerce/panier/entity/Cart.java b/backend/src/main/java/com/ecommerce/panier/entity/Cart.java
+index 9536c47..3bfa70f 100644
+--- a/backend/src/main/java/com/ecommerce/panier/entity/Cart.java
++++ b/backend/src/main/java/com/ecommerce/panier/entity/Cart.java
+@@ -20,9 +20,23 @@ public class Cart {
+     @GeneratedValue(strategy = GenerationType.IDENTITY)
+     private Long id;
+ 
+-    @Column(name = "user_id", nullable = false, unique = true)
++    /**
++     * Rempli pour un panier utilisateur connecté. Null pour un panier invité
++     * (identifié alors par guestId). Postgres autorise plusieurs NULL sur une
++     * colonne unique, donc pas de conflit entre paniers invités.
++     */
++    @Column(name = "user_id", unique = true)
+     private Long userId;
+ 
++    /**
++     * UUID généré côté navigateur pour un visiteur non connecté, afin qu'il
++     * ne perde pas son panier tant qu'il n'est pas prêt à créer un compte.
++     * Fusionné dans le panier utilisateur à la connexion/inscription (voir
++     * CartService.mergeGuestCartIntoUser).
++     */
++    @Column(name = "guest_id", unique = true)
++    private String guestId;
++
+     @OneToMany(mappedBy = "cart", cascade = CascadeType.ALL, orphanRemoval = true)
+     @Builder.Default
+     private List<CartItem> items = new ArrayList<>();
+diff --git a/backend/src/main/java/com/ecommerce/panier/entity/CartItem.java b/backend/src/main/java/com/ecommerce/panier/entity/CartItem.java
+index 7968281..e6b91fa 100644
+--- a/backend/src/main/java/com/ecommerce/panier/entity/CartItem.java
++++ b/backend/src/main/java/com/ecommerce/panier/entity/CartItem.java
+@@ -28,6 +28,9 @@ public class CartItem {
+     @Column(nullable = false)
+     private Grade grade;
+ 
++    @Column(nullable = false)
++    private String color;
++
+     @Column(nullable = false)
+     private int quantity;
+ }
+diff --git a/backend/src/main/java/com/ecommerce/panier/repository/CartRepository.java b/backend/src/main/java/com/ecommerce/panier/repository/CartRepository.java
+index ea161f4..4c154b6 100644
+--- a/backend/src/main/java/com/ecommerce/panier/repository/CartRepository.java
++++ b/backend/src/main/java/com/ecommerce/panier/repository/CartRepository.java
+@@ -7,4 +7,5 @@ import java.util.Optional;
+ 
+ public interface CartRepository extends JpaRepository<Cart, Long> {
+     Optional<Cart> findByUserId(Long userId);
++    Optional<Cart> findByGuestId(String guestId);
+ }
+diff --git a/backend/src/main/java/com/ecommerce/panier/service/CartService.java b/backend/src/main/java/com/ecommerce/panier/service/CartService.java
+index 56c9fdd..817835f 100644
+--- a/backend/src/main/java/com/ecommerce/panier/service/CartService.java
++++ b/backend/src/main/java/com/ecommerce/panier/service/CartService.java
+@@ -26,6 +26,11 @@ import java.util.List;
+  * Version "simple" du panier (pas de réservation d'unité) : on vérifie juste
+  * que le stock disponible couvre la quantité demandée au moment de l'ajout.
+  * L'assignation FIFO réelle des ProductUnit se fait à la validation de commande.
++ *
++ * Supporte aussi les paniers "invités" (utilisateur non connecté), identifiés
++ * par un guestId généré côté navigateur, pour ne pas perdre le panier avant
++ * la création d'un compte. Voir mergeGuestCartIntoUser pour la fusion à la
++ * connexion/inscription.
+  */
+ @Service
+ @RequiredArgsConstructor
+@@ -37,34 +42,51 @@ public class CartService {
+     private final ProductUnitRepository productUnitRepository;
+ 
+     @Transactional
+-    public CartDTO getCart(Long userId) {
+-        Cart cart = getOrCreateCart(userId);
++    public CartDTO getCart(Long userId, String guestId) {
++        Cart cart = resolveCart(userId, guestId);
+         return toDTO(cart);
+     }
+ 
+     @Transactional
+-    public CartDTO addItem(Long userId, AddCartItemRequest request) {
++    public CartDTO addItem(Long userId, String guestId, AddCartItemRequest request) {
+         Product product = productRepository.findById(request.getProductId())
+                 .orElseThrow(() -> new ResourceNotFoundException("Produit introuvable : " + request.getProductId()));
+ 
+-        long available = productUnitRepository.countByProductIdAndGradeAndStatus(
+-                product.getId(), request.getGrade(), UnitStatus.AVAILABLE);
++        Cart cart = resolveCart(userId, guestId);
+ 
+-        if (available < request.getQuantity()) {
++        CartItem existingItem = cart.getItems().stream()
++                .filter(i -> i.getProductId().equals(product.getId())
++                        && i.getGrade() == request.getGrade()
++                        && i.getColor().equals(request.getColor()))
++                .findFirst()
++                .orElse(null);
++
++        int alreadyInCart = existingItem != null ? existingItem.getQuantity() : 0;
++        int desiredTotalQuantity = alreadyInCart + request.getQuantity();
++
++        long available = productUnitRepository.countByProductIdAndGradeAndColorAndStatus(
++                product.getId(), request.getGrade(), request.getColor(), UnitStatus.AVAILABLE);
++
++        if (available < desiredTotalQuantity) {
+             throw new BadRequestException(
+-                    "Stock insuffisant pour ce grade (disponible : " + available + ")");
++                    "Stock insuffisant pour cette variante (disponible : " + available + ")");
+         }
+ 
+-        Cart cart = getOrCreateCart(userId);
+-
+-        CartItem item = CartItem.builder()
+-                .cart(cart)
+-                .productId(product.getId())
+-                .grade(request.getGrade())
+-                .quantity(request.getQuantity())
+-                .build();
++        if (existingItem != null) {
++            // même produit + grade + couleur déjà présents : on incrémente la
++            // quantité au lieu de créer une ligne dupliquée dans le panier
++            existingItem.setQuantity(desiredTotalQuantity);
++        } else {
++            CartItem item = CartItem.builder()
++                    .cart(cart)
++                    .productId(product.getId())
++                    .grade(request.getGrade())
++                    .color(request.getColor())
++                    .quantity(request.getQuantity())
++                    .build();
++            cart.getItems().add(item);
++        }
+ 
+-        cart.getItems().add(item);
+         cart.setUpdatedAt(Instant.now());
+         cartRepository.save(cart);
+ 
+@@ -72,15 +94,74 @@ public class CartService {
+     }
+ 
+     @Transactional
+-    public CartDTO removeItem(Long userId, Long itemId) {
+-        Cart cart = getOrCreateCart(userId);
++    public CartDTO removeItem(Long userId, String guestId, Long itemId) {
++        Cart cart = resolveCart(userId, guestId);
+         cart.getItems().removeIf(i -> i.getId().equals(itemId));
+         cart.setUpdatedAt(Instant.now());
+         cartRepository.save(cart);
+         return toDTO(cart);
+     }
+ 
+-    private Cart getOrCreateCart(Long userId) {
++    /**
++     * Fusionne le panier invité (s'il existe) dans le panier de l'utilisateur
++     * qui vient de se connecter/s'inscrire. Les lignes identiques (même
++     * produit+grade+couleur) voient leurs quantités additionnées. Le panier
++     * invité est ensuite supprimé.
++     */
++    @Transactional
++    public void mergeGuestCartIntoUser(String guestId, Long userId) {
++        if (guestId == null || guestId.isBlank()) {
++            return;
++        }
++
++        Cart guestCart = cartRepository.findByGuestId(guestId).orElse(null);
++        if (guestCart == null || guestCart.getItems().isEmpty()) {
++            if (guestCart != null) {
++                cartRepository.delete(guestCart);
++            }
++            return;
++        }
++
++        Cart userCart = getOrCreateCartForUser(userId);
++
++        for (CartItem guestItem : guestCart.getItems()) {
++            CartItem existing = userCart.getItems().stream()
++                    .filter(i -> i.getProductId().equals(guestItem.getProductId())
++                            && i.getGrade() == guestItem.getGrade()
++                            && i.getColor().equals(guestItem.getColor()))
++                    .findFirst()
++                    .orElse(null);
++
++            if (existing != null) {
++                existing.setQuantity(existing.getQuantity() + guestItem.getQuantity());
++            } else {
++                userCart.getItems().add(CartItem.builder()
++                        .cart(userCart)
++                        .productId(guestItem.getProductId())
++                        .grade(guestItem.getGrade())
++                        .color(guestItem.getColor())
++                        .quantity(guestItem.getQuantity())
++                        .build());
++            }
++        }
++
++        userCart.setUpdatedAt(Instant.now());
++        cartRepository.save(userCart);
++        cartRepository.delete(guestCart);
++    }
++
++    private Cart resolveCart(Long userId, String guestId) {
++        if (userId != null) {
++            return getOrCreateCartForUser(userId);
++        }
++        if (guestId != null && !guestId.isBlank()) {
++            return cartRepository.findByGuestId(guestId)
++                    .orElseGet(() -> cartRepository.save(Cart.builder().guestId(guestId).build()));
++        }
++        throw new BadRequestException("Identifiant de panier manquant (ni utilisateur connecté, ni panier invité)");
++    }
++
++    private Cart getOrCreateCartForUser(Long userId) {
+         return cartRepository.findByUserId(userId)
+                 .orElseGet(() -> cartRepository.save(Cart.builder().userId(userId).build()));
+     }
+@@ -107,7 +188,7 @@ public class CartService {
+ 
+         BigDecimal unitPrice = productUnitRepository.findByProductIdAndStatus(item.getProductId(), UnitStatus.AVAILABLE)
+                 .stream()
+-                .filter(u -> u.getGrade() == item.getGrade())
++                .filter(u -> u.getGrade() == item.getGrade() && u.getColor().equals(item.getColor()))
+                 .map(ProductUnit::getCurrentPrice)
+                 .findFirst()
+                 .orElse(BigDecimal.ZERO);
+@@ -117,6 +198,7 @@ public class CartService {
+                 .productId(item.getProductId())
+                 .productName(product != null ? product.getName() : null)
+                 .grade(item.getGrade())
++                .color(item.getColor())
+                 .quantity(item.getQuantity())
+                 .unitPrice(unitPrice)
+                 .subtotal(unitPrice.multiply(BigDecimal.valueOf(item.getQuantity())))
+diff --git a/backend/src/main/java/com/ecommerce/seed/DataSeeder.java b/backend/src/main/java/com/ecommerce/seed/DataSeeder.java
+index 1ad6427..a1e7e95 100644
+--- a/backend/src/main/java/com/ecommerce/seed/DataSeeder.java
++++ b/backend/src/main/java/com/ecommerce/seed/DataSeeder.java
+@@ -35,15 +35,15 @@ import java.util.List;
+ import java.util.Random;
+ 
+ /**
+-+ * Peuple la base avec des données de démo réalistes : utilisateurs, produits,
+-+ * unités par grade, historique de pricing (étalé sur 30 jours pour que le
+-+ * graphique du dashboard admin ait de quoi s'afficher), prix concurrents,
+-+ * vélocité des ventes, et une commande d'exemple.
+-+ *
+-+ * Activation : app.seed.enabled=true (désactivé par défaut). Idempotent :
+-+ * ne fait rien si des produits existent déjà, donc sans danger de le laisser
+-+ * activé en dev.
+-+ */
++ * Peuple la base avec des données de démo réalistes : utilisateurs, produits,
++ * unités par grade, historique de pricing (étalé sur 30 jours pour que le
++ * graphique du dashboard admin ait de quoi s'afficher), prix concurrents,
++ * vélocité des ventes, et une commande d'exemple.
++ *
++ * Activation : app.seed.enabled=true (désactivé par défaut). Idempotent :
++ * ne fait rien si des produits existent déjà, donc sans danger de le laisser
++ * activé en dev.
++ */
+ @Slf4j
+ @Component
+ @RequiredArgsConstructor
+@@ -171,6 +171,7 @@ public class DataSeeder implements CommandLineRunner {
+         );
+ 
+         List<Product> savedProducts = new ArrayList<>();
++        String[] colors = {"Noir", "Blanc", "Bleu", "Gris sidéral"};
+ 
+         for (SeedProduct def : defs) {
+             Product product = productRepository.save(Product.builder()
+@@ -188,6 +189,7 @@ public class DataSeeder implements CommandLineRunner {
+                             .product(product)
+                             .serialNumber(serial)
+                             .grade(gradeDef.grade())
++                            .color(colors[i % colors.length])
+                             .status(UnitStatus.AVAILABLE)
+                             .currentPrice(gradeDef.basePrice())
+                             .enteredStockAt(Instant.now().minus(random.nextInt(20), ChronoUnit.DAYS))
+@@ -202,11 +204,11 @@ public class DataSeeder implements CommandLineRunner {
+     }
+ 
+    /**
+-+     * Génère un historique de pricing étalé sur les 30 derniers jours pour
+-+     * chaque (produit, grade), avec des prix concurrents et un snapshot de
+-+     * vélocité — assez de données pour que le dashboard admin (table +
+-+     * graphique cumulé) ait un rendu parlant dès le premier lancement.
+-+     */
++     * Génère un historique de pricing étalé sur les 30 derniers jours pour
++     * chaque (produit, grade), avec des prix concurrents et un snapshot de
++     * vélocité — assez de données pour que le dashboard admin (table +
++     * graphique cumulé) ait un rendu parlant dès le premier lancement.
++     */
+     private void seedPriceHistoryAndSignals(List<Product> products) {
+         String[] reasons = {
+                 "Stock faible et forte demande récente → hausse de prix",
+@@ -293,10 +295,10 @@ public class DataSeeder implements CommandLineRunner {
+     }
+ 
+     /**
+-+     * Crée une commande de démonstration pour le compte client, en vendant
+-+     * réellement 2 unités (elles passent donc à SOLD) — utile pour voir
+-+     * OrderHistoryPage non-vide côté front sans avoir à checkout manuellement.
+-+     */
++     * Crée une commande de démonstration pour le compte client, en vendant
++     * réellement 2 unités (elles passent donc à SOLD) — utile pour voir
++     * OrderHistoryPage non-vide côté front sans avoir à checkout manuellement.
++     */
+     private void seedSampleOrder(List<Product> products, User admin) {
+         User client = userRepository.findByEmail("client@test.com").orElse(null);
+         if (client == null || products.isEmpty()) {
+diff --git a/frontend/src/api/axiosInstance.js b/frontend/src/api/axiosInstance.js
+index d72bd4c..6689be9 100644
+--- a/frontend/src/api/axiosInstance.js
++++ b/frontend/src/api/axiosInstance.js
+@@ -1,4 +1,5 @@
+ import axios from 'axios'
++import { getOrCreateGuestCartId } from '../utils/guestCart'
+ 
+ const axiosInstance = axios.create({
+   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api',
+@@ -8,6 +9,10 @@ axiosInstance.interceptors.request.use((config) => {
+   const token = localStorage.getItem('token')
+   if (token) {
+     config.headers.Authorization = `Bearer ${token}`
++  } else {
++    // Pas connecté : on identifie le panier (et une éventuelle fusion à la
++    // prochaine connexion/inscription) via un id invité persistant.
++    config.headers['X-Guest-Cart-Id'] = getOrCreateGuestCartId()
+   }
+   return config
+ })
+diff --git a/frontend/src/components/admin/PriceHistoryTable.jsx b/frontend/src/components/admin/PriceHistoryTable.jsx
+index c76958f..2d990de 100644
+--- a/frontend/src/components/admin/PriceHistoryTable.jsx
++++ b/frontend/src/components/admin/PriceHistoryTable.jsx
+@@ -4,7 +4,7 @@ import { formatCurrency } from '../../utils/formatCurrency'
+ 
+ export default function PriceHistoryTable({ entries }) {
+   if (!entries?.length) {
+-    return <p className="py-8 text-center text-sm text-ink-soft">Aucun ajustement de prix pour l'instant.</p>
++    return <p className="py-8 text-center text-sm text-ink-soft">Aucun ajustement de prix pour l’instant.</p>
+   }
+ 
+   return (
+diff --git a/frontend/src/components/admin/ProductUnitForm.jsx b/frontend/src/components/admin/ProductUnitForm.jsx
+index 542ca3b..03fe7d9 100644
+--- a/frontend/src/components/admin/ProductUnitForm.jsx
++++ b/frontend/src/components/admin/ProductUnitForm.jsx
+@@ -4,7 +4,7 @@ import toast from 'react-hot-toast'
+ import { productApi } from '../../api/productApi'
+ 
+ const GRADES = ['NEUF', 'A', 'B', 'C']
+-const EMPTY_FORM = { serialNumber: '', grade: 'A', currentPrice: '' }
++const EMPTY_FORM = { serialNumber: '', grade: 'A', color: '', currentPrice: '' }
+ 
+ export default function ProductUnitForm({ productId }) {
+   const [form, setForm] = useState(EMPTY_FORM)
+@@ -52,6 +52,13 @@ export default function ProductUnitForm({ productId }) {
+           </option>
+         ))}
+       </select>
++      <input
++        required
++        placeholder="Couleur (ex: Noir, Bleu…)"
++        value={form.color}
++        onChange={(e) => setForm({ ...form, color: e.target.value })}
++        className="rounded-md border border-surface-sunken px-3 py-2 text-sm"
++      />
+       <input
+         required
+         type="number"
+diff --git a/frontend/src/components/admin/RevenueImpactChart.jsx b/frontend/src/components/admin/RevenueImpactChart.jsx
+index 9dbf1a3..3affc68 100644
+--- a/frontend/src/components/admin/RevenueImpactChart.jsx
++++ b/frontend/src/components/admin/RevenueImpactChart.jsx
+@@ -42,7 +42,7 @@ export default function RevenueImpactChart({ historyEntries }) {
+   if (data.length === 0) {
+     return (
+       <div className="flex h-72 items-center justify-center rounded-xl border border-surface-sunken bg-surface text-sm text-ink-soft">
+-        Pas encore assez d'ajustements pour tracer une tendance.
++        Pas encore assez d’ajustements pour tracer une tendance.
+       </div>
+     )
+   }
+@@ -51,7 +51,7 @@ export default function RevenueImpactChart({ historyEntries }) {
+     <div className="rounded-xl border border-surface-sunken bg-surface p-5">
+       <h3 className="mb-1 font-display text-sm font-semibold">Impact revenu cumulé — dynamique vs statique</h3>
+       <p className="mb-4 text-xs text-ink-soft">
+-        Le scénario statique correspond à une absence d'ajustement de prix (référence à 0).
++        Le scénario statique correspond à une absence d’ajustement de prix (référence à 0).
+       </p>
+       <ResponsiveContainer width="100%" height={280}>
+         <LineChart data={data}>
+diff --git a/frontend/src/components/cart/CartItemRow.jsx b/frontend/src/components/cart/CartItemRow.jsx
+index e300ea1..ab9145e 100644
+--- a/frontend/src/components/cart/CartItemRow.jsx
++++ b/frontend/src/components/cart/CartItemRow.jsx
+@@ -6,7 +6,7 @@ export default function CartItemRow({ item, onRemove }) {
+       <div className="flex flex-col gap-1">
+         <span className="text-sm font-medium text-ink">{item.productName}</span>
+         <span className="font-mono text-xs text-ink-soft">
+-          Grade {item.grade} · quantité {item.quantity}
++          Grade {item.grade} · {item.color} · quantité {item.quantity}
+         </span>
+       </div>
+       <div className="flex items-center gap-4">
+diff --git a/frontend/src/components/cart/CartSummary.jsx b/frontend/src/components/cart/CartSummary.jsx
+index 8163d6a..8119d70 100644
+--- a/frontend/src/components/cart/CartSummary.jsx
++++ b/frontend/src/components/cart/CartSummary.jsx
+@@ -2,12 +2,22 @@ import { useNavigate } from 'react-router-dom'
+ import toast from 'react-hot-toast'
+ import PriceTag from '../common/PriceTag'
+ import { useCheckout } from '../../hooks/useOrders'
++import { useAuth } from '../../hooks/useAuth'
+ 
+ export default function CartSummary({ total, disabled }) {
+   const navigate = useNavigate()
++  const { isAuthenticated } = useAuth()
+   const checkout = useCheckout()
+ 
+   const handleCheckout = () => {
++    if (!isAuthenticated) {
++      // Le panier est conservé (fusionné automatiquement après connexion) :
++      // on redirige juste vers la connexion pour finaliser la commande.
++      toast('Connecte-toi pour valider ta commande — ton panier est conservé')
++      navigate('/login', { state: { from: { pathname: '/cart' } } })
++      return
++    }
++
+     checkout.mutate(undefined, {
+       onSuccess: (order) => {
+         toast.success('Commande confirmée')
+@@ -30,7 +40,11 @@ export default function CartSummary({ total, disabled }) {
+         disabled={disabled || checkout.isPending}
+         className="rounded-lg bg-ink py-3 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-40"
+       >
+-        {checkout.isPending ? 'Validation…' : 'Valider la commande'}
++        {checkout.isPending
++          ? 'Validation…'
++          : isAuthenticated
++            ? 'Valider la commande'
++            : 'Se connecter pour valider'}
+       </button>
+     </div>
+   )
+diff --git a/frontend/src/components/catalogue/GradeSelector.jsx b/frontend/src/components/catalogue/GradeSelector.jsx
+index 514859c..02df470 100644
+--- a/frontend/src/components/catalogue/GradeSelector.jsx
++++ b/frontend/src/components/catalogue/GradeSelector.jsx
+@@ -14,34 +14,73 @@ const GRADE_COLORS = {
+   C: 'border-grade-c text-grade-c',
+ }
+ 
+-export default function GradeSelector({ variants, selectedGrade, onSelect }) {
++/**
++ * Sélection en deux temps : d'abord le grade (état de reconditionnement, qui
++ * pilote le prix), puis la couleur disponible pour ce grade (n'affecte pas
++ * le prix, seulement le stock — voir la note dans ProductUnit côté backend).
++ */
++export default function GradeSelector({ variants, selectedGrade, selectedColor, onSelectGrade, onSelectColor }) {
++  const grades = [...new Set(variants.map((v) => v.grade))];
++  const colorOptions = variants.filter((v) => v.grade === selectedGrade);
++
+   return (
+-    <div className="flex flex-col gap-2">
+-      {variants.map((v) => {
+-        const isSelected = v.grade === selectedGrade
+-        const isOutOfStock = v.availableStock === 0
++    <div className="flex flex-col gap-5">
++      <div className="flex flex-col gap-2">
++        {grades.map((grade) => {
++          const gradeVariants = variants.filter((v) => v.grade === grade);
++          const anyStock = gradeVariants.some((v) => v.availableStock > 0);
++          const isSelected = grade === selectedGrade;
++          const referencePrice = gradeVariants[0]?.currentPrice;
++
++          return (
++            <button
++              key={grade}
++              disabled={!anyStock}
++              onClick={() => onSelectGrade(grade)}
++              className={`flex items-center justify-between rounded-lg border-2 px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-40 ${
++                isSelected
++                  ? `${GRADE_COLORS[grade]} bg-surface-muted`
++                  : 'border-surface-sunken hover:border-ink-soft'
++              }`}
++            >
++              <div className="flex flex-col">
++                <span className="text-sm font-medium text-ink">{GRADE_LABELS[grade] || grade}</span>
++                <span className="font-mono text-xs text-ink-soft">
++                  {anyStock ? `${gradeVariants.length} couleur(s) disponible(s)` : 'Rupture de stock'}
++                </span>
++              </div>
++              <PriceTag price={referencePrice} size="sm" />
++            </button>
++          );
++        })}
++      </div>
+ 
+-        return (
+-          <button
+-            key={v.grade}
+-            disabled={isOutOfStock}
+-            onClick={() => onSelect(v.grade)}
+-            className={`flex items-center justify-between rounded-lg border-2 px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-40 ${
+-              isSelected
+-                ? `${GRADE_COLORS[v.grade]} bg-surface-muted`
+-                : 'border-surface-sunken hover:border-ink-soft'
+-            }`}
+-          >
+-            <div className="flex flex-col">
+-              <span className="text-sm font-medium text-ink">{GRADE_LABELS[v.grade] || v.grade}</span>
+-              <span className="font-mono text-xs text-ink-soft">
+-                {isOutOfStock ? 'Rupture de stock' : `${v.availableStock} en stock`}
+-              </span>
+-            </div>
+-            <PriceTag price={v.currentPrice} size="sm" />
+-          </button>
+-        )
+-      })}
++      {selectedGrade && (
++        <div>
++          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-soft">Couleur</div>
++          <div className="flex flex-wrap gap-2">
++            {colorOptions.map((v) => {
++              const isOutOfStock = v.availableStock === 0;
++              const isSelected = v.color === selectedColor;
++              return (
++                <button
++                  key={v.color}
++                  disabled={isOutOfStock}
++                  onClick={() => onSelectColor(v.color)}
++                  className={`rounded-full border-2 px-4 py-1.5 text-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
++                    isSelected
++                      ? 'border-ink bg-ink text-white'
++                      : 'border-surface-sunken text-ink hover:border-ink-soft'
++                  }`}
++                >
++                  {v.color}
++                  {isOutOfStock && ' (rupture)'}
++                </button>
++              );
++            })}
++          </div>
++        </div>
++      )}
+     </div>
+   )
+ }
+diff --git a/frontend/src/components/catalogue/ProductCard.jsx b/frontend/src/components/catalogue/ProductCard.jsx
+index ffff4e5..2e963fd 100644
+--- a/frontend/src/components/catalogue/ProductCard.jsx
++++ b/frontend/src/components/catalogue/ProductCard.jsx
+@@ -15,7 +15,7 @@ export default function ProductCard({ product }) {
+           />
+         ) : (
+           <div className="flex h-full w-full items-center justify-center text-ink-soft">
+-            <span className="text-xs">Pas d'image</span>
++            <span className="text-xs">Pas d’image</span>
+           </div>
+         )}
+       </div>
+diff --git a/frontend/src/components/common/Footer.jsx b/frontend/src/components/common/Footer.jsx
+index 4fc9678..3b6303e 100644
+--- a/frontend/src/components/common/Footer.jsx
++++ b/frontend/src/components/common/Footer.jsx
+@@ -2,7 +2,7 @@ export default function Footer() {
+   return (
+     <footer className="mt-16 border-t border-surface-sunken bg-surface">
+       <div className="mx-auto max-w-6xl px-4 py-6 text-xs text-ink-soft">
+-        Projet de fin d'année — plateforme e-commerce avec pricing dynamique piloté par IA.
++        Projet de fin d’année — plateforme e-commerce avec pricing dynamique piloté par IA.
+       </div>
+     </footer>
+   )
+diff --git a/frontend/src/context/AuthContext.jsx b/frontend/src/context/AuthContext.jsx
+index 2a29935..999ee1e 100644
+--- a/frontend/src/context/AuthContext.jsx
++++ b/frontend/src/context/AuthContext.jsx
+@@ -1,6 +1,7 @@
+ import React, { createContext, useState, useCallback } from 'react'
+ import { authApi } from '../api/authApi'
+ import { decodeJwtPayload } from '../utils/jwt'
++import { clearGuestCartId } from '../utils/guestCart'
+ 
+ export const AuthContext = createContext(null)
+ 
+@@ -20,6 +21,9 @@ export function AuthProvider({ children }) {
+     }
+     localStorage.setItem('user', JSON.stringify(userData))
+     setUser(userData)
++    // Le panier invité (s'il existait) vient d'être fusionné côté backend
++    // dans le panier du compte : plus besoin de l'id local.
++    clearGuestCartId()
+   }
+ 
+   const login = useCallback(async (credentials) => {
+diff --git a/frontend/src/hooks/useCart.js b/frontend/src/hooks/useCart.js
+index 8f99c58..a6478a5 100644
+--- a/frontend/src/hooks/useCart.js
++++ b/frontend/src/hooks/useCart.js
+@@ -1,16 +1,16 @@
+ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+ import toast from 'react-hot-toast'
+ import { cartApi } from '../api/cartApi'
+-import { useAuth } from './useAuth'
+ 
+ export function useCart() {
+-  const { isAuthenticated } = useAuth()
+   const queryClient = useQueryClient()
+ 
++  // Le panier est accessible qu'on soit connecté (identifié par JWT) ou non
++  // (identifié par le header X-Guest-Cart-Id, voir api/axiosInstance.js) :
++  // pas de restriction "enabled" ici, sinon un visiteur perdrait son panier.
+   const cartQuery = useQuery({
+     queryKey: ['cart'],
+     queryFn: cartApi.get,
+-    enabled: isAuthenticated,
+   })
+ 
+   const addItemMutation = useMutation({
+diff --git a/frontend/src/pages/LoginPage.jsx b/frontend/src/pages/LoginPage.jsx
+index ed50d05..2e4f9ef 100644
+--- a/frontend/src/pages/LoginPage.jsx
++++ b/frontend/src/pages/LoginPage.jsx
+@@ -1,5 +1,6 @@
+ import { useState } from 'react'
+ import { useNavigate, useLocation, Link } from 'react-router-dom'
++import { useQueryClient } from '@tanstack/react-query'
+ import toast from 'react-hot-toast'
+ import { useAuth } from '../hooks/useAuth'
+ 
+@@ -7,6 +8,7 @@ export default function LoginPage() {
+   const { login } = useAuth()
+   const navigate = useNavigate()
+   const location = useLocation()
++  const queryClient = useQueryClient()
+   const [form, setForm] = useState({ email: '', password: '' })
+   const [isSubmitting, setIsSubmitting] = useState(false)
+ 
+@@ -15,6 +17,9 @@ export default function LoginPage() {
+     setIsSubmitting(true)
+     try {
+       await login(form)
++      // Le panier invité éventuel vient d'être fusionné côté backend :
++      // on invalide le cache pour refléter le panier fusionné.
++      queryClient.invalidateQueries({ queryKey: ['cart'] })
+       toast.success('Connexion réussie')
+       navigate(location.state?.from?.pathname || '/')
+     } catch (err) {
+diff --git a/frontend/src/pages/OrderHistoryPage.jsx b/frontend/src/pages/OrderHistoryPage.jsx
+index f3250b0..bf1aa89 100644
+--- a/frontend/src/pages/OrderHistoryPage.jsx
++++ b/frontend/src/pages/OrderHistoryPage.jsx
+@@ -29,7 +29,7 @@ export default function OrderHistoryPage() {
+       <h1 className="mb-6 text-2xl">Mes commandes</h1>
+ 
+       {orders.length === 0 ? (
+-        <p className="text-sm text-ink-soft">Aucune commande pour l'instant.</p>
++        <p className="text-sm text-ink-soft">Aucune commande pour l’instant.</p>
+       ) : (
+         <div className="flex flex-col gap-3">
+           {orders.map((order) => (
+diff --git a/frontend/src/pages/ProductDetailPage.jsx b/frontend/src/pages/ProductDetailPage.jsx
+index d30a07b..13f200a 100644
+--- a/frontend/src/pages/ProductDetailPage.jsx
++++ b/frontend/src/pages/ProductDetailPage.jsx
+@@ -1,9 +1,7 @@
+ import { useState, useEffect } from 'react'
+ import { useParams } from 'react-router-dom'
+-import toast from 'react-hot-toast'
+ import { useProductDetail } from '../hooks/useProducts'
+ import { useCart } from '../hooks/useCart'
+-import { useAuth } from '../hooks/useAuth'
+ import GradeSelector from '../components/catalogue/GradeSelector'
+ import LoadingSpinner from '../components/common/LoadingSpinner'
+ import ErrorBanner from '../components/common/ErrorBanner'
+@@ -12,30 +10,36 @@ export default function ProductDetailPage() {
+   const { id } = useParams()
+   const { data, isLoading, isError } = useProductDetail(Number(id))
+   const { addItem, isAdding } = useCart()
+-  const { isAuthenticated } = useAuth()
+   const [selectedGrade, setSelectedGrade] = useState(null)
++  const [selectedColor, setSelectedColor] = useState(null)
+   const [quantity, setQuantity] = useState(1)
+ 
+   useEffect(() => {
+     if (data?.variants?.length && !selectedGrade) {
+-      const firstAvailable = data.variants.find((v) => v.availableStock > 0)
+-      setSelectedGrade(firstAvailable?.grade ?? data.variants[0].grade)
++      const firstAvailable = data.variants.find((v) => v.availableStock > 0) ?? data.variants[0]
++      setSelectedGrade(firstAvailable.grade)
++      setSelectedColor(firstAvailable.color)
+     }
+   }, [data, selectedGrade])
+ 
++  // Si on change de grade, on retombe sur une couleur valide pour ce grade
++  const handleSelectGrade = (grade) => {
++    setSelectedGrade(grade)
++    const firstColorForGrade = data.variants.find((v) => v.grade === grade && v.availableStock > 0)
++      ?? data.variants.find((v) => v.grade === grade)
++    setSelectedColor(firstColorForGrade?.color ?? null)
++    setQuantity(1)
++  }
++
+   if (isLoading) return <LoadingSpinner label="Chargement de la fiche produit…" />
+   if (isError || !data) return <div className="mx-auto max-w-3xl px-4 py-10"><ErrorBanner message="Produit introuvable." /></div>
+ 
+   const { product, variants } = data
+-  const selectedVariant = variants.find((v) => v.grade === selectedGrade)
++  const selectedVariant = variants.find((v) => v.grade === selectedGrade && v.color === selectedColor)
+ 
+   const handleAddToCart = () => {
+-    if (!isAuthenticated) {
+-      toast.error('Connecte-toi pour ajouter au panier')
+-      return
+-    }
+     if (!selectedVariant) return
+-    addItem({ productId: product.id, grade: selectedGrade, quantity })
++    addItem({ productId: product.id, grade: selectedGrade, color: selectedColor, quantity })
+   }
+ 
+   return (
+@@ -45,7 +49,7 @@ export default function ProductDetailPage() {
+           {product.imageUrl ? (
+             <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
+           ) : (
+-            <div className="flex h-full w-full items-center justify-center text-ink-soft">Pas d'image</div>
++            <div className="flex h-full w-full items-center justify-center text-ink-soft">Pas d’image</div>
+           )}
+         </div>
+ 
+@@ -57,9 +61,15 @@ export default function ProductDetailPage() {
+           </div>
+ 
+           <div>
+-            <h2 className="mb-3 text-sm font-medium text-ink-soft">Choisir un état</h2>
++            <h2 className="mb-3 text-sm font-medium text-ink-soft">Choisir un état et une couleur</h2>
+             {variants.length > 0 ? (
+-              <GradeSelector variants={variants} selectedGrade={selectedGrade} onSelect={setSelectedGrade} />
++              <GradeSelector
++                variants={variants}
++                selectedGrade={selectedGrade}
++                selectedColor={selectedColor}
++                onSelectGrade={handleSelectGrade}
++                onSelectColor={setSelectedColor}
++              />
+             ) : (
+               <ErrorBanner message="Aucune unité en stock pour ce produit." />
+             )}
+diff --git a/frontend/src/pages/RegisterPage.jsx b/frontend/src/pages/RegisterPage.jsx
+index 758edb2..72157c4 100644
+--- a/frontend/src/pages/RegisterPage.jsx
++++ b/frontend/src/pages/RegisterPage.jsx
+@@ -1,11 +1,13 @@
+ import { useState } from 'react'
+ import { useNavigate, Link } from 'react-router-dom'
++import { useQueryClient } from '@tanstack/react-query'
+ import toast from 'react-hot-toast'
+ import { useAuth } from '../hooks/useAuth'
+ 
+ export default function RegisterPage() {
+   const { register } = useAuth()
+   const navigate = useNavigate()
++  const queryClient = useQueryClient()
+   const [form, setForm] = useState({ email: '', password: '', fullName: '' })
+   const [isSubmitting, setIsSubmitting] = useState(false)
+ 
+@@ -14,6 +16,7 @@ export default function RegisterPage() {
+     setIsSubmitting(true)
+     try {
+       await register(form)
++      queryClient.invalidateQueries({ queryKey: ['cart'] })
+       toast.success('Compte créé')
+       navigate('/')
+     } catch (err) {
+diff --git a/frontend/src/pages/admin/AdminDashboardPage.jsx b/frontend/src/pages/admin/AdminDashboardPage.jsx
+index 3b26e01..5bf484c 100644
+--- a/frontend/src/pages/admin/AdminDashboardPage.jsx
++++ b/frontend/src/pages/admin/AdminDashboardPage.jsx
+@@ -24,7 +24,7 @@ export default function AdminDashboardPage() {
+   return (
+     <div>
+       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+-        <h1 className="text-2xl">Vue d'ensemble</h1>
++        <h1 className="text-2xl">Vue d’ensemble</h1>
+         <DateRangePicker from={range.from} to={range.to} onChange={setRange} />
+       </div>
+ 
+diff --git a/frontend/src/routes/AppRouter.jsx b/frontend/src/routes/AppRouter.jsx
+index 6ff7d9d..1de36f7 100644
+--- a/frontend/src/routes/AppRouter.jsx
++++ b/frontend/src/routes/AppRouter.jsx
+@@ -25,11 +25,11 @@ export default function AppRouter() {
+         <Routes>
+           <Route path="/" element={<HomePage />} />
+           <Route path="/products/:id" element={<ProductDetailPage />} />
++          <Route path="/cart" element={<CartPage />} />
+           <Route path="/login" element={<LoginPage />} />
+           <Route path="/register" element={<RegisterPage />} />
+ 
+           <Route element={<ProtectedRoute />}>
+-            <Route path="/cart" element={<CartPage />} />
+             <Route path="/orders" element={<OrderHistoryPage />} />
+             <Route path="/orders/confirmation/:id" element={<OrderConfirmationPage />} />
+           </Route>
+@@ -54,7 +54,7 @@ function NotFound() {
+   return (
+     <div className="mx-auto max-w-lg px-4 py-24 text-center">
+       <h1 className="text-2xl">Page introuvable</h1>
+-      <p className="mt-2 text-sm text-ink-soft">L'URL demandée n'existe pas.</p>
++      <p className="mt-2 text-sm text-ink-soft">L’URL demandée n’existe pas.</p>
+     </div>
+   )
+ }
+diff --git a/frontend/src/utils/guestCart.js b/frontend/src/utils/guestCart.js
+new file mode 100644
+index 0000000..faff95b
+--- /dev/null
++++ b/frontend/src/utils/guestCart.js
+@@ -0,0 +1,24 @@
++const KEY = 'guestCartId'
++
++/**
++ * Génère (une seule fois) et persiste un identifiant de panier invité, pour
++ * qu'un visiteur non connecté ne perde pas son panier tant qu'il n'a pas créé
++ * de compte. Envoyé via le header X-Guest-Cart-Id sur les requêtes panier
++ * (et auth, pour permettre la fusion à la connexion).
++ */
++export function getOrCreateGuestCartId() {
++  let id = localStorage.getItem(KEY)
++  if (!id) {
++    id = crypto.randomUUID()
++    localStorage.setItem(KEY, id)
++  }
++  return id
++}
++
++/**
++ * À appeler après une connexion/inscription réussie : le panier invité vient
++ * d'être fusionné côté backend, l'identifiant local n'a plus lieu d'être.
++ */
++export function clearGuestCartId() {
++  localStorage.removeItem(KEY)
++}

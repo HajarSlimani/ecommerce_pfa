@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
-import toast from 'react-hot-toast'
 import { useProductDetail } from '../hooks/useProducts'
 import { useCart } from '../hooks/useCart'
-import { useAuth } from '../hooks/useAuth'
 import GradeSelector from '../components/catalogue/GradeSelector'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorBanner from '../components/common/ErrorBanner'
@@ -12,30 +10,36 @@ export default function ProductDetailPage() {
   const { id } = useParams()
   const { data, isLoading, isError } = useProductDetail(Number(id))
   const { addItem, isAdding } = useCart()
-  const { isAuthenticated } = useAuth()
   const [selectedGrade, setSelectedGrade] = useState(null)
+  const [selectedColor, setSelectedColor] = useState(null)
   const [quantity, setQuantity] = useState(1)
 
   useEffect(() => {
     if (data?.variants?.length && !selectedGrade) {
-      const firstAvailable = data.variants.find((v) => v.availableStock > 0)
-      setSelectedGrade(firstAvailable?.grade ?? data.variants[0].grade)
+      const firstAvailable = data.variants.find((v) => v.availableStock > 0) ?? data.variants[0]
+      setSelectedGrade(firstAvailable.grade)
+      setSelectedColor(firstAvailable.color)
     }
   }, [data, selectedGrade])
+
+  // Si on change de grade, on retombe sur une couleur valide pour ce grade
+  const handleSelectGrade = (grade) => {
+    setSelectedGrade(grade)
+    const firstColorForGrade = data.variants.find((v) => v.grade === grade && v.availableStock > 0)
+      ?? data.variants.find((v) => v.grade === grade)
+    setSelectedColor(firstColorForGrade?.color ?? null)
+    setQuantity(1)
+  }
 
   if (isLoading) return <LoadingSpinner label="Chargement de la fiche produit…" />
   if (isError || !data) return <div className="mx-auto max-w-3xl px-4 py-10"><ErrorBanner message="Produit introuvable." /></div>
 
   const { product, variants } = data
-  const selectedVariant = variants.find((v) => v.grade === selectedGrade)
+  const selectedVariant = variants.find((v) => v.grade === selectedGrade && v.color === selectedColor)
 
   const handleAddToCart = () => {
-    if (!isAuthenticated) {
-      toast.error('Connecte-toi pour ajouter au panier')
-      return
-    }
     if (!selectedVariant) return
-    addItem({ productId: product.id, grade: selectedGrade, quantity })
+    addItem({ productId: product.id, grade: selectedGrade, color: selectedColor, quantity })
   }
 
   return (
@@ -45,7 +49,7 @@ export default function ProductDetailPage() {
           {product.imageUrl ? (
             <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-ink-soft">Pas d'image</div>
+            <div className="flex h-full w-full items-center justify-center text-ink-soft">Pas d’image</div>
           )}
         </div>
 
@@ -57,9 +61,15 @@ export default function ProductDetailPage() {
           </div>
 
           <div>
-            <h2 className="mb-3 text-sm font-medium text-ink-soft">Choisir un état</h2>
+            <h2 className="mb-3 text-sm font-medium text-ink-soft">Choisir un état et une couleur</h2>
             {variants.length > 0 ? (
-              <GradeSelector variants={variants} selectedGrade={selectedGrade} onSelect={setSelectedGrade} />
+              <GradeSelector
+                variants={variants}
+                selectedGrade={selectedGrade}
+                selectedColor={selectedColor}
+                onSelectGrade={handleSelectGrade}
+                onSelectColor={setSelectedColor}
+              />
             ) : (
               <ErrorBanner message="Aucune unité en stock pour ce produit." />
             )}

@@ -26,6 +26,11 @@ import java.util.List;
  * Version "simple" du panier (pas de réservation d'unité) : on vérifie juste
  * que le stock disponible couvre la quantité demandée au moment de l'ajout.
  * L'assignation FIFO réelle des ProductUnit se fait à la validation de commande.
+ *
+ * Supporte aussi les paniers "invités" (utilisateur non connecté), identifiés
+ * par un guestId généré côté navigateur, pour ne pas perdre le panier avant
+ * la création d'un compte. Voir mergeGuestCartIntoUser pour la fusion à la
+ * connexion/inscription.
  */
 @Service
 @RequiredArgsConstructor
@@ -37,34 +42,51 @@ public class CartService {
     private final ProductUnitRepository productUnitRepository;
 
     @Transactional
-    public CartDTO getCart(Long userId) {
-        Cart cart = getOrCreateCart(userId);
+    public CartDTO getCart(Long userId, String guestId) {
+        Cart cart = resolveCart(userId, guestId);
         return toDTO(cart);
     }
 
     @Transactional
-    public CartDTO addItem(Long userId, AddCartItemRequest request) {
+    public CartDTO addItem(Long userId, String guestId, AddCartItemRequest request) {
         Product product = productRepository.findById(request.getProductId())
                 .orElseThrow(() -> new ResourceNotFoundException("Produit introuvable : " + request.getProductId()));
 
-        long available = productUnitRepository.countByProductIdAndGradeAndStatus(
-                product.getId(), request.getGrade(), UnitStatus.AVAILABLE);
+        Cart cart = resolveCart(userId, guestId);
 
-        if (available < request.getQuantity()) {
+        CartItem existingItem = cart.getItems().stream()
+                .filter(i -> i.getProductId().equals(product.getId())
+                        && i.getGrade() == request.getGrade()
+                        && i.getColor().equals(request.getColor()))
+                .findFirst()
+                .orElse(null);
+
+        int alreadyInCart = existingItem != null ? existingItem.getQuantity() : 0;
+        int desiredTotalQuantity = alreadyInCart + request.getQuantity();
+
+        long available = productUnitRepository.countByProductIdAndGradeAndColorAndStatus(
+                product.getId(), request.getGrade(), request.getColor(), UnitStatus.AVAILABLE);
+
+        if (available < desiredTotalQuantity) {
             throw new BadRequestException(
-                    "Stock insuffisant pour ce grade (disponible : " + available + ")");
+                    "Stock insuffisant pour cette variante (disponible : " + available + ")");
         }
 
-        Cart cart = getOrCreateCart(userId);
+        if (existingItem != null) {
+            // même produit + grade + couleur déjà présents : on incrémente la
+            // quantité au lieu de créer une ligne dupliquée dans le panier
+            existingItem.setQuantity(desiredTotalQuantity);
+        } else {
+            CartItem item = CartItem.builder()
+                    .cart(cart)
+                    .productId(product.getId())
+                    .grade(request.getGrade())
+                    .color(request.getColor())
+                    .quantity(request.getQuantity())
+                    .build();
+            cart.getItems().add(item);
+        }
 
-        CartItem item = CartItem.builder()
-                .cart(cart)
-                .productId(product.getId())
-                .grade(request.getGrade())
-                .quantity(request.getQuantity())
-                .build();
-
-        cart.getItems().add(item);
         cart.setUpdatedAt(Instant.now());
         cartRepository.save(cart);
 
@@ -72,15 +94,74 @@ public class CartService {
     }
 
     @Transactional
-    public CartDTO removeItem(Long userId, Long itemId) {
-        Cart cart = getOrCreateCart(userId);
+    public CartDTO removeItem(Long userId, String guestId, Long itemId) {
+        Cart cart = resolveCart(userId, guestId);
         cart.getItems().removeIf(i -> i.getId().equals(itemId));
         cart.setUpdatedAt(Instant.now());
         cartRepository.save(cart);
         return toDTO(cart);
     }
 
-    private Cart getOrCreateCart(Long userId) {
+    /**
+     * Fusionne le panier invité (s'il existe) dans le panier de l'utilisateur
+     * qui vient de se connecter/s'inscrire. Les lignes identiques (même
+     * produit+grade+couleur) voient leurs quantités additionnées. Le panier
+     * invité est ensuite supprimé.
+     */
+    @Transactional
+    public void mergeGuestCartIntoUser(String guestId, Long userId) {
+        if (guestId == null || guestId.isBlank()) {
+            return;
+        }
+
+        Cart guestCart = cartRepository.findByGuestId(guestId).orElse(null);
+        if (guestCart == null || guestCart.getItems().isEmpty()) {
+            if (guestCart != null) {
+                cartRepository.delete(guestCart);
+            }
+            return;
+        }
+
+        Cart userCart = getOrCreateCartForUser(userId);
+
+        for (CartItem guestItem : guestCart.getItems()) {
+            CartItem existing = userCart.getItems().stream()
+                    .filter(i -> i.getProductId().equals(guestItem.getProductId())
+                            && i.getGrade() == guestItem.getGrade()
+                            && i.getColor().equals(guestItem.getColor()))
+                    .findFirst()
+                    .orElse(null);
+
+            if (existing != null) {
+                existing.setQuantity(existing.getQuantity() + guestItem.getQuantity());
+            } else {
+                userCart.getItems().add(CartItem.builder()
+                        .cart(userCart)
+                        .productId(guestItem.getProductId())
+                        .grade(guestItem.getGrade())
+                        .color(guestItem.getColor())
+                        .quantity(guestItem.getQuantity())
+                        .build());
+            }
+        }
+
+        userCart.setUpdatedAt(Instant.now());
+        cartRepository.save(userCart);
+        cartRepository.delete(guestCart);
+    }
+
+    private Cart resolveCart(Long userId, String guestId) {
+        if (userId != null) {
+            return getOrCreateCartForUser(userId);
+        }
+        if (guestId != null && !guestId.isBlank()) {
+            return cartRepository.findByGuestId(guestId)
+                    .orElseGet(() -> cartRepository.save(Cart.builder().guestId(guestId).build()));
+        }
+        throw new BadRequestException("Identifiant de panier manquant (ni utilisateur connecté, ni panier invité)");
+    }
+
+    private Cart getOrCreateCartForUser(Long userId) {
         return cartRepository.findByUserId(userId)
                 .orElseGet(() -> cartRepository.save(Cart.builder().userId(userId).build()));
     }
@@ -107,7 +188,7 @@ public class CartService {
 
         BigDecimal unitPrice = productUnitRepository.findByProductIdAndStatus(item.getProductId(), UnitStatus.AVAILABLE)
                 .stream()
-                .filter(u -> u.getGrade() == item.getGrade())
+                .filter(u -> u.getGrade() == item.getGrade() && u.getColor().equals(item.getColor()))
                 .map(ProductUnit::getCurrentPrice)
                 .findFirst()
                 .orElse(BigDecimal.ZERO);
@@ -117,6 +198,7 @@ public class CartService {
                 .productId(item.getProductId())
                 .productName(product != null ? product.getName() : null)
                 .grade(item.getGrade())
+                .color(item.getColor())
                 .quantity(item.getQuantity())
                 .unitPrice(unitPrice)
                 .subtotal(unitPrice.multiply(BigDecimal.valueOf(item.getQuantity())))

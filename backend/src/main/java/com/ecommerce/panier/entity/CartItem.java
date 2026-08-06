@@ -29,5 +29,8 @@ public class CartItem {
     private Grade grade;
 
     @Column(nullable = false)
+    private String color;
+
+    @Column(nullable = false)
     private int quantity;
 }

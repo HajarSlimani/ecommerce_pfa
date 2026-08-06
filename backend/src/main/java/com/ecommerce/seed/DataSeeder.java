@@ -35,15 +35,15 @@ import java.util.List;
 import java.util.Random;
 
 /**
-+ * Peuple la base avec des données de démo réalistes : utilisateurs, produits,
-+ * unités par grade, historique de pricing (étalé sur 30 jours pour que le
-+ * graphique du dashboard admin ait de quoi s'afficher), prix concurrents,
-+ * vélocité des ventes, et une commande d'exemple.
-+ *
-+ * Activation : app.seed.enabled=true (désactivé par défaut). Idempotent :
-+ * ne fait rien si des produits existent déjà, donc sans danger de le laisser
-+ * activé en dev.
-+ */
+ * Peuple la base avec des données de démo réalistes : utilisateurs, produits,
+ * unités par grade, historique de pricing (étalé sur 30 jours pour que le
+ * graphique du dashboard admin ait de quoi s'afficher), prix concurrents,
+ * vélocité des ventes, et une commande d'exemple.
+ *
+ * Activation : app.seed.enabled=true (désactivé par défaut). Idempotent :
+ * ne fait rien si des produits existent déjà, donc sans danger de le laisser
+ * activé en dev.
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -171,6 +171,7 @@ public class DataSeeder implements CommandLineRunner {
         );
 
         List<Product> savedProducts = new ArrayList<>();
+        String[] colors = {"Noir", "Blanc", "Bleu", "Gris sidéral"};
 
         for (SeedProduct def : defs) {
             Product product = productRepository.save(Product.builder()
@@ -188,6 +189,7 @@ public class DataSeeder implements CommandLineRunner {
                             .product(product)
                             .serialNumber(serial)
                             .grade(gradeDef.grade())
+                            .color(colors[i % colors.length])
                             .status(UnitStatus.AVAILABLE)
                             .currentPrice(gradeDef.basePrice())
                             .enteredStockAt(Instant.now().minus(random.nextInt(20), ChronoUnit.DAYS))
@@ -202,11 +204,11 @@ public class DataSeeder implements CommandLineRunner {
     }
 
    /**
-+     * Génère un historique de pricing étalé sur les 30 derniers jours pour
-+     * chaque (produit, grade), avec des prix concurrents et un snapshot de
-+     * vélocité — assez de données pour que le dashboard admin (table +
-+     * graphique cumulé) ait un rendu parlant dès le premier lancement.
-+     */
+     * Génère un historique de pricing étalé sur les 30 derniers jours pour
+     * chaque (produit, grade), avec des prix concurrents et un snapshot de
+     * vélocité — assez de données pour que le dashboard admin (table +
+     * graphique cumulé) ait un rendu parlant dès le premier lancement.
+     */
     private void seedPriceHistoryAndSignals(List<Product> products) {
         String[] reasons = {
                 "Stock faible et forte demande récente → hausse de prix",
@@ -293,10 +295,10 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     /**
-+     * Crée une commande de démonstration pour le compte client, en vendant
-+     * réellement 2 unités (elles passent donc à SOLD) — utile pour voir
-+     * OrderHistoryPage non-vide côté front sans avoir à checkout manuellement.
-+     */
+     * Crée une commande de démonstration pour le compte client, en vendant
+     * réellement 2 unités (elles passent donc à SOLD) — utile pour voir
+     * OrderHistoryPage non-vide côté front sans avoir à checkout manuellement.
+     */
     private void seedSampleOrder(List<Product> products, User admin) {
         User client = userRepository.findByEmail("client@test.com").orElse(null);
         if (client == null || products.isEmpty()) {

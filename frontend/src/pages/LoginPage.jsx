@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { useAuth } from '../hooks/useAuth'
 
@@ -7,6 +8,7 @@ export default function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const queryClient = useQueryClient()
   const [form, setForm] = useState({ email: '', password: '' })
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -15,6 +17,9 @@ export default function LoginPage() {
     setIsSubmitting(true)
     try {
       await login(form)
+      // Le panier invité éventuel vient d'être fusionné côté backend :
+      // on invalide le cache pour refléter le panier fusionné.
+      queryClient.invalidateQueries({ queryKey: ['cart'] })
       toast.success('Connexion réussie')
       navigate(location.state?.from?.pathname || '/')
     } catch (err) {

@@ -25,11 +25,11 @@ export default function AppRouter() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/products/:id" element={<ProductDetailPage />} />
+          <Route path="/cart" element={<CartPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
 
           <Route element={<ProtectedRoute />}>
-            <Route path="/cart" element={<CartPage />} />
             <Route path="/orders" element={<OrderHistoryPage />} />
             <Route path="/orders/confirmation/:id" element={<OrderConfirmationPage />} />
           </Route>
@@ -54,7 +54,7 @@ function NotFound() {
   return (
     <div className="mx-auto max-w-lg px-4 py-24 text-center">
       <h1 className="text-2xl">Page introuvable</h1>
-      <p className="mt-2 text-sm text-ink-soft">L'URL demandée n'existe pas.</p>
+      <p className="mt-2 text-sm text-ink-soft">L’URL demandée n’existe pas.</p>
     </div>
   )
 }

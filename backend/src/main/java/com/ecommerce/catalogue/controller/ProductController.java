@@ -4,9 +4,9 @@ import com.ecommerce.catalogue.dto.CreateProductRequest;
 import com.ecommerce.catalogue.dto.ProductDTO;
 import com.ecommerce.catalogue.dto.ProductDetailDTO;
 import com.ecommerce.catalogue.service.ProductService;
+import com.ecommerce.common.dto.PageResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -20,7 +20,7 @@ public class ProductController {
     private final ProductService productService;
 
     @GetMapping
-    public ResponseEntity<Page<ProductDTO>> list(
+    public ResponseEntity<PageResponse<ProductDTO>> list(
             @RequestParam(required = false) String category,
             Pageable pageable) {
         return ResponseEntity.ok(productService.listProducts(category, pageable));

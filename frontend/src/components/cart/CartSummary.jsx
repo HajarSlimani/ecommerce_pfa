@@ -2,12 +2,22 @@ import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import PriceTag from '../common/PriceTag'
 import { useCheckout } from '../../hooks/useOrders'
+import { useAuth } from '../../hooks/useAuth'
 
 export default function CartSummary({ total, disabled }) {
   const navigate = useNavigate()
+  const { isAuthenticated } = useAuth()
   const checkout = useCheckout()
 
   const handleCheckout = () => {
+    if (!isAuthenticated) {
+      // Le panier est conservé (fusionné automatiquement après connexion) :
+      // on redirige juste vers la connexion pour finaliser la commande.
+      toast('Connecte-toi pour valider ta commande — ton panier est conservé')
+      navigate('/login', { state: { from: { pathname: '/cart' } } })
+      return
+    }
+
     checkout.mutate(undefined, {
       onSuccess: (order) => {
         toast.success('Commande confirmée')
@@ -30,7 +40,11 @@ export default function CartSummary({ total, disabled }) {
         disabled={disabled || checkout.isPending}
         className="rounded-lg bg-ink py-3 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-40"
       >
-        {checkout.isPending ? 'Validation…' : 'Valider la commande'}
+        {checkout.isPending
+          ? 'Validation…'
+          : isAuthenticated
+            ? 'Valider la commande'
+            : 'Se connecter pour valider'}
       </button>
     </div>
   )

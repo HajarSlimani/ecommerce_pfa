@@ -6,7 +6,7 @@ export default function CartItemRow({ item, onRemove }) {
       <div className="flex flex-col gap-1">
         <span className="text-sm font-medium text-ink">{item.productName}</span>
         <span className="font-mono text-xs text-ink-soft">
-          Grade {item.grade} · quantité {item.quantity}
+          Grade {item.grade} · {item.color} · quantité {item.quantity}
         </span>
       </div>
       <div className="flex items-center gap-4">

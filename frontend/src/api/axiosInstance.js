@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getOrCreateGuestCartId } from '../utils/guestCart'
 
 const axiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api',
@@ -8,6 +9,10 @@ axiosInstance.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
+  } else {
+    // Pas connecté : on identifie le panier (et une éventuelle fusion à la
+    // prochaine connexion/inscription) via un id invité persistant.
+    config.headers['X-Guest-Cart-Id'] = getOrCreateGuestCartId()
   }
   return config
 })

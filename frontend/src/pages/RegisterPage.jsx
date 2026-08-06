@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { useAuth } from '../hooks/useAuth'
 
 export default function RegisterPage() {
   const { register } = useAuth()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [form, setForm] = useState({ email: '', password: '', fullName: '' })
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -14,6 +16,7 @@ export default function RegisterPage() {
     setIsSubmitting(true)
     try {
       await register(form)
+      queryClient.invalidateQueries({ queryKey: ['cart'] })
       toast.success('Compte créé')
       navigate('/')
     } catch (err) {

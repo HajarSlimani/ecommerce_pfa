@@ -15,7 +15,7 @@ export default function ProductCard({ product }) {
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-ink-soft">
-            <span className="text-xs">Pas d'image</span>
+            <span className="text-xs">Pas d’image</span>
           </div>
         )}
       </div>
