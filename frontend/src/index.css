@@ -4,12 +4,17 @@
 
 @layer base {
   h1, h2, h3, h4 {
-    @apply font-display font-semibold tracking-tight text-ink;
+    @apply font-display font-medium text-ink;
+    letter-spacing: -0.01em;
   }
 }
 
 @layer utilities {
   .tabular-price {
     @apply font-mono tabular-nums;
+  }
+
+  .eyebrow {
+    @apply text-[11px] font-medium uppercase tracking-[0.14em] text-ink-soft;
   }
 }

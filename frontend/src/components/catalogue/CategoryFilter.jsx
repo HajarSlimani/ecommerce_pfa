@@ -1,29 +1,29 @@
-const CATEGORIES = ['electronics', 'smartphones', 'laptops', 'audio']
+import { CATEGORIES } from '../../constants/catalogue'
 
 export default function CategoryFilter({ value, onChange }) {
   return (
     <div className="flex flex-wrap gap-2">
       <button
         onClick={() => onChange('')}
-        className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+        className={`rounded-full border px-4 py-1.5 text-xs font-medium uppercase tracking-wide transition ${
           value === ''
-            ? 'bg-ink text-white'
-            : 'bg-surface-sunken text-ink-soft hover:bg-surface-muted'
+            ? 'border-ink bg-ink text-white'
+            : 'border-line text-ink-soft hover:border-ink-soft hover:text-ink'
         }`}
       >
         Tous
       </button>
       {CATEGORIES.map((cat) => (
         <button
-          key={cat}
-          onClick={() => onChange(cat)}
-          className={`rounded-full px-3 py-1.5 text-xs font-medium capitalize transition ${
-            value === cat
-              ? 'bg-ink text-white'
-              : 'bg-surface-sunken text-ink-soft hover:bg-surface-muted'
+          key={cat.id}
+          onClick={() => onChange(cat.id)}
+          className={`rounded-full border px-4 py-1.5 text-xs font-medium uppercase tracking-wide transition ${
+            value === cat.id
+              ? 'border-ink bg-ink text-white'
+              : 'border-line text-ink-soft hover:border-ink-soft hover:text-ink'
           }`}
         >
-          {cat}
+          {cat.label}
         </button>
       ))}
     </div>

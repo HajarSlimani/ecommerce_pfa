@@ -64,7 +64,7 @@ public class DataSeeder implements CommandLineRunner {
     private final Random random = new Random(42); // seed fixe = données reproductibles
 
     private record SeedProduct(String name, String brand, String category, String description,
-                                List<GradeDef> grades) {}
+                                String imageUrl, List<GradeDef> grades) {}
 
     private record GradeDef(Grade grade, BigDecimal basePrice, int unitCount) {}
 
@@ -114,6 +114,7 @@ public class DataSeeder implements CommandLineRunner {
         List<SeedProduct> defs = List.of(
                 new SeedProduct("iPhone 13 128GB", "Apple", "smartphones",
                         "Smartphone reconditionné, écran OLED 6.1 pouces.",
+                        "https://images.unsplash.com/photo-1632661674596-df8be070a5c5?w=800&q=80",
                         List.of(
                                 new GradeDef(Grade.NEUF, new BigDecimal("620.00"), 3),
                                 new GradeDef(Grade.A, new BigDecimal("480.00"), 6),
@@ -122,6 +123,7 @@ public class DataSeeder implements CommandLineRunner {
                         )),
                 new SeedProduct("Samsung Galaxy S21", "Samsung", "smartphones",
                         "Smartphone Android reconditionné, 128GB.",
+                        "https://images.unsplash.com/photo-1610945415295-d9bbf067e59c?w=800&q=80",
                         List.of(
                                 new GradeDef(Grade.A, new BigDecimal("380.00"), 5),
                                 new GradeDef(Grade.B, new BigDecimal("310.00"), 6),
@@ -129,6 +131,7 @@ public class DataSeeder implements CommandLineRunner {
                         )),
                 new SeedProduct("MacBook Air M1", "Apple", "laptops",
                         "Ordinateur portable reconditionné, 256GB SSD, 8GB RAM.",
+                        "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=800&q=80",
                         List.of(
                                 new GradeDef(Grade.NEUF, new BigDecimal("950.00"), 2),
                                 new GradeDef(Grade.A, new BigDecimal("780.00"), 4),
@@ -136,6 +139,7 @@ public class DataSeeder implements CommandLineRunner {
                         )),
                 new SeedProduct("Dell XPS 13", "Dell", "laptops",
                         "Ultrabook reconditionné, i5, 16GB RAM, 512GB SSD.",
+                        "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=800&q=80",
                         List.of(
                                 new GradeDef(Grade.A, new BigDecimal("690.00"), 4),
                                 new GradeDef(Grade.B, new BigDecimal("560.00"), 5),
@@ -143,6 +147,7 @@ public class DataSeeder implements CommandLineRunner {
                         )),
                 new SeedProduct("AirPods Pro", "Apple", "audio",
                         "Écouteurs sans fil reconditionnés avec réduction de bruit.",
+                        "https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?w=800&q=80",
                         List.of(
                                 new GradeDef(Grade.NEUF, new BigDecimal("180.00"), 4),
                                 new GradeDef(Grade.A, new BigDecimal("140.00"), 6),
@@ -150,12 +155,14 @@ public class DataSeeder implements CommandLineRunner {
                         )),
                 new SeedProduct("Sony WH-1000XM4", "Sony", "audio",
                         "Casque sans fil à réduction de bruit active, reconditionné.",
+                        "https://images.unsplash.com/photo-1618366712010-f4ae9c647dcb?w=800&q=80",
                         List.of(
                                 new GradeDef(Grade.A, new BigDecimal("210.00"), 3),
                                 new GradeDef(Grade.B, new BigDecimal("170.00"), 4)
                         )),
                 new SeedProduct("iPad 9th Gen 64GB", "Apple", "electronics",
                         "Tablette reconditionnée, écran Retina 10.2 pouces.",
+                        "https://images.unsplash.com/photo-1544244015-0df4b3ffc6b0?w=800&q=80",
                         List.of(
                                 new GradeDef(Grade.NEUF, new BigDecimal("320.00"), 3),
                                 new GradeDef(Grade.A, new BigDecimal("260.00"), 5),
@@ -163,6 +170,7 @@ public class DataSeeder implements CommandLineRunner {
                         )),
                 new SeedProduct("Google Pixel 6", "Google", "smartphones",
                         "Smartphone Android reconditionné, 128GB.",
+                        "https://images.unsplash.com/photo-1598965675045-45c5e72c7d05?w=800&q=80",
                         List.of(
                                 new GradeDef(Grade.A, new BigDecimal("340.00"), 4),
                                 new GradeDef(Grade.B, new BigDecimal("280.00"), 5),
@@ -179,6 +187,7 @@ public class DataSeeder implements CommandLineRunner {
                     .brand(def.brand())
                     .category(def.category())
                     .description(def.description())
+                    .imageUrl(def.imageUrl())
                     .build());
 
             int serialCounter = 1;
