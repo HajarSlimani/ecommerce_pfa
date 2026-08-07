@@ -1,0 +1,47 @@
+diff --git a/frontend/src/routes/AppRouter.jsx b/frontend/src/routes/AppRouter.jsx
+index 377ba2e..6e24a0f 100644
+--- a/frontend/src/routes/AppRouter.jsx
++++ b/frontend/src/routes/AppRouter.jsx
+@@ -1,3 +1,4 @@
++import { useEffect } from 'react'
+ import { Routes, Route, useLocation } from 'react-router-dom'
+ import Navbar from '../components/common/Navbar'
+ import Footer from '../components/common/Footer'
+@@ -18,6 +19,29 @@ import AdminDashboardPage from '../pages/admin/AdminDashboardPage'
+ import AdminProductsPage from '../pages/admin/AdminProductsPage'
+ import AdminPricingHistoryPage from '../pages/admin/AdminPricingHistoryPage'
+ 
++// React Router ne fait pas défiler la page vers une ancre (#hash) tout seul
++// lors d'une navigation côté client — contrairement à un lien HTML classique.
++// Sans ça, un lien comme "/#categories" change bien l'URL mais laisse
++// l'utilisateur en haut de la page.
++function ScrollManager() {
++  const location = useLocation()
++
++  useEffect(() => {
++    if (location.hash) {
++      // Léger délai : le contenu de la page cible vient de monter, on laisse
++      // le DOM se poser avant de mesurer sa position.
++      const id = location.hash.slice(1)
++      const timeout = setTimeout(() => {
++        document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
++      }, 50)
++      return () => clearTimeout(timeout)
++    }
++    window.scrollTo({ top: 0 })
++  }, [location.pathname, location.hash])
++
++  return null
++}
++
+ export default function AppRouter() {
+   const location = useLocation()
+   // Le hero de la home passe sous la navbar transparente ; les autres pages
+@@ -26,6 +50,7 @@ export default function AppRouter() {
+ 
+   return (
+     <div className="flex min-h-screen flex-col">
++      <ScrollManager />
+       <Navbar />
+       <div className={`flex-1 ${needsTopPadding ? 'pt-20' : ''}`}>
+         <Routes>

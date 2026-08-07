@@ -17,4 +17,13 @@
   .eyebrow {
     @apply text-[11px] font-medium uppercase tracking-[0.14em] text-ink-soft;
   }
+
+  .animate-kenburns {
+    animation: kenburns 6s ease-out forwards;
+  }
+}
+
+@keyframes kenburns {
+  from { transform: scale(1); }
+  to { transform: scale(1.08); }
 }

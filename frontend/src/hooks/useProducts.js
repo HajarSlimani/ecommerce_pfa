@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { productApi } from '../api/productApi'
 
-export function useProducts({ category, page = 0, size = 12 } = {}) {
+export function useProducts({ category, page = 0, size = 12, sort } = {}) {
   return useQuery({
-    queryKey: ['products', category, page, size],
-    queryFn: () => productApi.list({ category, page, size }),
+    queryKey: ['products', category, page, size, sort],
+    queryFn: () => productApi.list({ category, page, size, sort }),
   })
 }
 

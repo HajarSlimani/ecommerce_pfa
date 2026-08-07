@@ -1,0 +1,713 @@
+diff --git a/frontend/package-lock.json b/frontend/package-lock.json
+index 10e23b3..272dd88 100644
+--- a/frontend/package-lock.json
++++ b/frontend/package-lock.json
+@@ -10,6 +10,7 @@
+       "dependencies": {
+         "@tanstack/react-query": "^5.51.1",
+         "axios": "^1.7.2",
++        "lucide-react": "^0.408.0",
+         "react": "^18.3.1",
+         "react-dom": "^18.3.1",
+         "react-hot-toast": "^2.4.1",
+@@ -4222,6 +4223,15 @@
+         "yallist": "^3.0.2"
+       }
+     },
++    "node_modules/lucide-react": {
++      "version": "0.408.0",
++      "resolved": "https://registry.npmjs.org/lucide-react/-/lucide-react-0.408.0.tgz",
++      "integrity": "sha512-8kETAAeWmOvtGIr7HPHm51DXoxlfkNncQ5FZWXR+abX8saQwMYXANWIkUstaYtcKSo/imOe/q+tVFA8ANzdSVA==",
++      "license": "ISC",
++      "peerDependencies": {
++        "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0"
++      }
++    },
+     "node_modules/math-intrinsics": {
+       "version": "1.1.0",
+       "resolved": "https://registry.npmjs.org/math-intrinsics/-/math-intrinsics-1.1.0.tgz",
+diff --git a/frontend/package.json b/frontend/package.json
+index 1a69288..4a29c45 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -12,6 +12,7 @@
+   "dependencies": {
+     "@tanstack/react-query": "^5.51.1",
+     "axios": "^1.7.2",
++    "lucide-react": "^0.408.0",
+     "react": "^18.3.1",
+     "react-dom": "^18.3.1",
+     "react-hot-toast": "^2.4.1",
+diff --git a/frontend/src/api/productApi.js b/frontend/src/api/productApi.js
+index 13f1af5..aaf85dc 100644
+--- a/frontend/src/api/productApi.js
++++ b/frontend/src/api/productApi.js
+@@ -1,9 +1,9 @@
+ import axiosInstance from './axiosInstance'
+ 
+ export const productApi = {
+-  list: ({ category, page = 0, size = 12 } = {}) =>
++  list: ({ category, page = 0, size = 12, sort } = {}) =>
+     axiosInstance
+-      .get('/products', { params: { category: category || undefined, page, size } })
++      .get('/products', { params: { category: category || undefined, page, size, sort } })
+       .then((r) => r.data),
+ 
+   getDetail: (id) => axiosInstance.get(`/products/${id}`).then((r) => r.data),
+diff --git a/frontend/src/components/common/Navbar.jsx b/frontend/src/components/common/Navbar.jsx
+index d64de64..8193ba8 100644
+--- a/frontend/src/components/common/Navbar.jsx
++++ b/frontend/src/components/common/Navbar.jsx
+@@ -1,64 +1,152 @@
+-import { Link, useNavigate } from 'react-router-dom'
++import { useState, useEffect } from 'react'
++import { Link, useNavigate, useLocation } from 'react-router-dom'
++import { Search, User, ShoppingBag, X } from 'lucide-react'
+ import { useAuth } from '../../hooks/useAuth'
+ import { useCart } from '../../hooks/useCart'
+ 
++export const NAVBAR_HEIGHT = 'h-20'
++
+ export default function Navbar() {
+-  const { isAuthenticated, isAdmin, user, logout } = useAuth()
++  const { isAuthenticated, isAdmin, logout } = useAuth()
+   const { cart } = useCart()
+   const navigate = useNavigate()
++  const location = useLocation()
+   const itemCount = cart?.items?.reduce((sum, i) => sum + i.quantity, 0) || 0
+ 
++  const [isScrolled, setIsScrolled] = useState(false)
++  const [searchOpen, setSearchOpen] = useState(false)
++  const [searchValue, setSearchValue] = useState('')
++
++  // Sur la page d'accueil, le hero plein écran est sombre : la navbar démarre
++  // transparente avec du texte clair, puis bascule en verre dépoli au scroll.
++  // Sur les autres pages (fond clair dès le haut), elle est toujours en mode
++  // "verre" pour rester lisible.
++  const overHero = location.pathname === '/' && !isScrolled
++
++  useEffect(() => {
++    const onScroll = () => setIsScrolled(window.scrollY > 40)
++    onScroll()
++    window.addEventListener('scroll', onScroll, { passive: true })
++    return () => window.removeEventListener('scroll', onScroll)
++  }, [])
++
++  useEffect(() => {
++    setSearchOpen(false)
++  }, [location.pathname])
++
+   const handleLogout = () => {
+     logout()
+     navigate('/')
+   }
+ 
++  const handleSearchSubmit = (e) => {
++    e.preventDefault()
++    if (searchValue.trim()) {
++      navigate(`/boutique?q=${encodeURIComponent(searchValue.trim())}`)
++    }
++    setSearchOpen(false)
++  }
++
++  const textClass = overHero ? 'text-white' : 'text-ink'
++  const softTextClass = overHero ? 'text-white/75' : 'text-ink-soft'
++
+   return (
+-    <header className="sticky top-0 z-20 border-b border-line bg-surface">
+-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+-        <Link to="/" className="font-display text-xl font-medium tracking-tight text-ink">
++    <header
++      className={`fixed inset-x-0 top-0 z-30 ${NAVBAR_HEIGHT} transition-colors duration-300 ${
++        overHero
++          ? 'border-b border-transparent bg-transparent'
++          : 'border-b border-line bg-white/80 backdrop-blur-md'
++      }`}
++    >
++      <div className="mx-auto grid h-full max-w-6xl grid-cols-[1fr_auto_1fr] items-center px-6">
++        <Link
++          to="/"
++          className={`font-display text-xl font-medium tracking-tight ${textClass}`}
++        >
+           NewDev <span className="italic text-brand-500">Shop</span>
+         </Link>
+ 
+-        <nav className="flex items-center gap-7 text-sm text-ink-soft">
+-          <Link to="/" className="transition hover:text-ink">Catalogue</Link>
++        <nav className={`hidden items-center gap-8 text-sm font-medium sm:flex ${softTextClass}`}>
++          <Link to="/" className={`transition hover:${overHero ? 'text-white' : 'text-ink'}`}>
++            Accueil
++          </Link>
++          <Link to="/boutique" className="transition hover:text-inherit">
++            Boutique
++          </Link>
++          <Link to="/#categories" className="transition hover:text-inherit">
++            Catégories
++          </Link>
++        </nav>
+ 
+-          {isAdmin && (
+-            <Link to="/admin" className="transition hover:text-ink">Administration</Link>
+-          )}
++        <div className={`flex items-center justify-end gap-5 ${textClass}`}>
++          <div className="relative flex items-center">
++            {searchOpen ? (
++              <form onSubmit={handleSearchSubmit} className="flex items-center">
++                <input
++                  autoFocus
++                  type="text"
++                  value={searchValue}
++                  onChange={(e) => setSearchValue(e.target.value)}
++                  placeholder="Rechercher…"
++                  className="w-40 border-b border-current bg-transparent py-1 text-sm placeholder:text-current/50 focus:outline-none sm:w-52"
++                />
++                <button
++                  type="button"
++                  onClick={() => setSearchOpen(false)}
++                  aria-label="Fermer la recherche"
++                  className="ml-2"
++                >
++                  <X size={16} />
++                </button>
++              </form>
++            ) : (
++              <button onClick={() => setSearchOpen(true)} aria-label="Rechercher">
++                <Search size={19} strokeWidth={1.6} />
++              </button>
++            )}
++          </div>
+ 
+-          {isAuthenticated && (
+-            <Link to="/orders" className="transition hover:text-ink">Mes commandes</Link>
++          {isAuthenticated ? (
++            <div className="group relative">
++              <Link to="/orders" aria-label="Mon compte">
++                <User size={19} strokeWidth={1.6} />
++              </Link>
++              <div className="invisible absolute right-0 top-full mt-3 w-44 border border-line bg-white py-2 opacity-0 shadow-sm transition group-hover:visible group-hover:opacity-100">
++                <Link to="/orders" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
++                  Mes commandes
++                </Link>
++                {isAdmin && (
++                  <Link to="/admin" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
++                    Administration
++                  </Link>
++                )}
++                <button
++                  onClick={handleLogout}
++                  className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-surface-muted"
++                >
++                  Déconnexion
++                </button>
++              </div>
++            </div>
++          ) : (
++            <Link to="/login" aria-label="Connexion">
++              <User size={19} strokeWidth={1.6} />
++            </Link>
+           )}
+ 
+-          <Link to="/cart" className="relative transition hover:text-ink">
+-            Panier
++          <Link to="/cart" className="relative" aria-label="Panier">
++            <ShoppingBag size={19} strokeWidth={1.6} />
+             {itemCount > 0 && (
+-              <span className="absolute -right-3.5 -top-2 flex h-4 w-4 items-center justify-center rounded-full bg-ink text-[10px] font-mono text-white">
++              <span
++                className={`absolute -right-2 -top-2 flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-mono ${
++                  overHero ? 'bg-white text-ink' : 'bg-ink text-white'
++                }`}
++              >
+                 {itemCount}
+               </span>
+             )}
+           </Link>
+-
+-          {isAuthenticated ? (
+-            <div className="flex items-center gap-4 border-l border-line pl-5">
+-              <span className="text-xs text-ink-soft">{user.email}</span>
+-              <button
+-                onClick={handleLogout}
+-                className="text-xs font-medium text-ink transition hover:text-brand-600"
+-              >
+-                Déconnexion
+-              </button>
+-            </div>
+-          ) : (
+-            <Link
+-              to="/login"
+-              className="border-l border-line pl-5 text-xs font-medium text-ink transition hover:text-brand-600"
+-            >
+-              Connexion
+-            </Link>
+-          )}
+-        </nav>
++        </div>
+       </div>
+     </header>
+   )
+diff --git a/frontend/src/components/home/Hero.jsx b/frontend/src/components/home/Hero.jsx
+new file mode 100644
+index 0000000..319cd8e
+--- /dev/null
++++ b/frontend/src/components/home/Hero.jsx
+@@ -0,0 +1,126 @@
++import { useState, useEffect, useRef } from 'react'
++import { Link } from 'react-router-dom'
++import { useProducts } from '../../hooks/useProducts'
++
++const SLIDE_DURATION = 6000
++
++export default function Hero() {
++  // Les produits les plus récemment ajoutés font office de mise en avant hero
++  // tant qu'il n'existe pas de champ "featured" dédié côté catalogue.
++  const { data } = useProducts({ size: 6, sort: 'createdAt,desc' })
++  const slides = (data?.content || []).filter((p) => p.imageUrl).slice(0, 5)
++
++  const [index, setIndex] = useState(0)
++  const timerRef = useRef(null)
++
++  useEffect(() => {
++    if (slides.length < 2) return
++    timerRef.current = setInterval(() => {
++      setIndex((i) => (i + 1) % slides.length)
++    }, SLIDE_DURATION)
++    return () => clearInterval(timerRef.current)
++  }, [slides.length])
++
++  const pause = () => clearInterval(timerRef.current)
++  const resume = () => {
++    if (slides.length < 2) return
++    timerRef.current = setInterval(() => {
++      setIndex((i) => (i + 1) % slides.length)
++    }, SLIDE_DURATION)
++  }
++
++  if (slides.length === 0) {
++    return (
++      <section className="relative -mt-20 flex min-h-[90vh] items-center justify-center bg-ink px-6 pt-20">
++        <div className="mx-auto max-w-xl text-center">
++          <p className="mb-4 text-xs font-medium uppercase tracking-[0.14em] text-white/60">
++            Électronique reconditionnée
++          </p>
++          <h1 className="font-sans text-4xl font-bold leading-[1.05] tracking-tight text-white sm:text-6xl">
++            La seconde vie de la tech, au prix juste.
++          </h1>
++          <p className="mt-5 text-base leading-relaxed text-white/75 sm:text-lg">
++            Smartphones, ordinateurs et audio contrôlés, gradés et garantis.
++          </p>
++          <Link
++            to="/boutique"
++            className="mt-8 inline-block rounded-full bg-brand-500 px-6 py-3 text-sm font-medium text-white transition hover:bg-brand-600"
++          >
++            Explorer le catalogue
++          </Link>
++        </div>
++      </section>
++    )
++  }
++
++  const active = slides[index]
++
++  return (
++    <section
++      onMouseEnter={pause}
++      onMouseLeave={resume}
++      className="relative -mt-20 h-[90vh] min-h-[560px] overflow-hidden bg-ink"
++    >
++      {slides.map((product, i) => (
++        <div
++          key={product.id}
++          className={`absolute inset-0 transition-opacity duration-700 ${
++            i === index ? 'opacity-100' : 'opacity-0'
++          }`}
++        >
++          <img
++            key={`${product.id}-${i === index}`}
++            src={product.imageUrl}
++            alt={product.name}
++            className={`h-full w-full object-cover ${i === index ? 'animate-kenburns' : ''}`}
++          />
++          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-black/10" />
++        </div>
++      ))}
++
++      <div className="absolute inset-x-0 bottom-0 px-6 pb-24 pt-20">
++        <div className="mx-auto max-w-6xl">
++          <p className="mb-4 text-xs font-medium uppercase tracking-[0.14em] text-white/70">
++            {active.brand || 'Électronique reconditionnée'}
++          </p>
++          <h1 className="max-w-2xl font-sans text-4xl font-bold leading-[1.05] tracking-tight text-white sm:text-6xl">
++            {active.name}
++          </h1>
++          <p className="mt-5 max-w-md text-base leading-relaxed text-white/80 sm:text-lg">
++            Contrôlé, gradé et garanti — au prix ajusté du moment.
++          </p>
++
++          <div className="mt-9 flex flex-wrap items-center gap-4">
++            <Link
++              to={`/products/${active.id}`}
++              className="rounded-full border border-white/70 px-6 py-3 text-sm font-medium text-white transition hover:bg-white/10"
++            >
++              En savoir plus
++            </Link>
++            <Link
++              to={`/products/${active.id}`}
++              className="rounded-full bg-brand-500 px-6 py-3 text-sm font-medium text-white transition hover:bg-brand-600"
++            >
++              Acheter
++            </Link>
++          </div>
++        </div>
++      </div>
++
++      {slides.length > 1 && (
++        <div className="absolute inset-x-0 bottom-8 flex justify-center gap-2">
++          {slides.map((s, i) => (
++            <button
++              key={s.id}
++              onClick={() => setIndex(i)}
++              aria-label={`Diapositive ${i + 1}`}
++              className={`h-1.5 rounded-full transition-all ${
++                i === index ? 'w-6 bg-white' : 'w-1.5 bg-white/40 hover:bg-white/60'
++              }`}
++            />
++          ))}
++        </div>
++      )}
++    </section>
++  )
++}
+diff --git a/frontend/src/components/home/ProductRail.jsx b/frontend/src/components/home/ProductRail.jsx
+new file mode 100644
+index 0000000..a692abb
+--- /dev/null
++++ b/frontend/src/components/home/ProductRail.jsx
+@@ -0,0 +1,26 @@
++import { Link } from 'react-router-dom'
++import { useProducts } from '../../hooks/useProducts'
++import ProductGrid from '../catalogue/ProductGrid'
++import LoadingSpinner from '../common/LoadingSpinner'
++
++export default function ProductRail({ eyebrow, title, sort, shopLink = '/boutique' }) {
++  const { data, isLoading } = useProducts({ size: 4, sort })
++
++  if (!isLoading && !data?.content?.length) return null
++
++  return (
++    <section className="mx-auto max-w-6xl px-6 py-16">
++      <div className="mb-8 flex items-end justify-between">
++        <div>
++          <p className="eyebrow mb-3">{eyebrow}</p>
++          <h2 className="font-display text-3xl font-medium text-ink">{title}</h2>
++        </div>
++        <Link to={shopLink} className="hidden text-sm font-medium text-ink-soft transition hover:text-ink sm:block">
++          Voir tout →
++        </Link>
++      </div>
++
++      {isLoading ? <LoadingSpinner /> : <ProductGrid products={data.content} />}
++    </section>
++  )
++}
+diff --git a/frontend/src/hooks/useProducts.js b/frontend/src/hooks/useProducts.js
+index 405ca63..b7444d9 100644
+--- a/frontend/src/hooks/useProducts.js
++++ b/frontend/src/hooks/useProducts.js
+@@ -1,10 +1,10 @@
+ import { useQuery } from '@tanstack/react-query'
+ import { productApi } from '../api/productApi'
+ 
+-export function useProducts({ category, page = 0, size = 12 } = {}) {
++export function useProducts({ category, page = 0, size = 12, sort } = {}) {
+   return useQuery({
+-    queryKey: ['products', category, page, size],
+-    queryFn: () => productApi.list({ category, page, size }),
++    queryKey: ['products', category, page, size, sort],
++    queryFn: () => productApi.list({ category, page, size, sort }),
+   })
+ }
+ 
+diff --git a/frontend/src/index.css b/frontend/src/index.css
+index 37334a0..535bd5e 100644
+--- a/frontend/src/index.css
++++ b/frontend/src/index.css
+@@ -17,4 +17,13 @@
+   .eyebrow {
+     @apply text-[11px] font-medium uppercase tracking-[0.14em] text-ink-soft;
+   }
++
++  .animate-kenburns {
++    animation: kenburns 6s ease-out forwards;
++  }
++}
++
++@keyframes kenburns {
++  from { transform: scale(1); }
++  to { transform: scale(1.08); }
+ }
+diff --git a/frontend/src/pages/HomePage.jsx b/frontend/src/pages/HomePage.jsx
+index c7e98ee..17a1355 100644
+--- a/frontend/src/pages/HomePage.jsx
++++ b/frontend/src/pages/HomePage.jsx
+@@ -1,101 +1,52 @@
+-import { useState, useRef } from 'react'
+-import { useProducts } from '../hooks/useProducts'
++import { Link } from 'react-router-dom'
++import Hero from '../components/home/Hero'
++import ProductRail from '../components/home/ProductRail'
+ import { CATEGORIES, GRADES } from '../constants/catalogue'
+-import ProductGrid from '../components/catalogue/ProductGrid'
+-import CategoryFilter from '../components/catalogue/CategoryFilter'
+-import Pagination from '../components/common/Pagination'
+-import LoadingSpinner from '../components/common/LoadingSpinner'
+-import ErrorBanner from '../components/common/ErrorBanner'
+-
+-const TRUST_ITEMS = [
+-  { value: '12 mois', label: 'Garantie constructeur' },
+-  { value: '42 points', label: 'Contrôle qualité' },
+-  { value: 'En continu', label: 'Prix ajustés par IA' },
+-  { value: 'Suivie', label: 'Livraison' },
+-]
+ 
+ export default function HomePage() {
+-  const [category, setCategory] = useState('')
+-  const [page, setPage] = useState(0)
+-  const catalogueRef = useRef(null)
+-
+-  const { data, isLoading, isError } = useProducts({ category, page })
+-
+-  const handleCategoryChange = (cat) => {
+-    setCategory(cat)
+-    setPage(0)
+-  }
+-
+-  const scrollToCatalogue = (cat = '') => {
+-    if (cat) handleCategoryChange(cat)
+-    catalogueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+-  }
+-
+   return (
+     <div>
+-      {/* Hero */}
+-      <section className="mx-auto max-w-6xl px-6 pb-16 pt-20 sm:pt-28">
+-        <p className="eyebrow mb-6">Électronique reconditionnée</p>
+-        <h1 className="max-w-3xl font-display text-5xl font-medium leading-[1.05] tracking-tight text-ink sm:text-6xl">
+-          La seconde vie de la tech, <em className="font-normal italic text-brand-500">au prix juste.</em>
+-        </h1>
+-        <p className="mt-6 max-w-xl text-lg leading-relaxed text-ink-soft">
+-          Smartphones, ordinateurs et audio contrôlés, gradés et garantis. Chaque
+-          prix s’ajuste en continu à la demande et au stock disponible.
+-        </p>
+-        <div className="mt-9 flex flex-wrap items-center gap-4">
+-          <button
+-            onClick={() => scrollToCatalogue()}
+-            className="rounded-full bg-ink px-6 py-3 text-sm font-medium text-white transition hover:bg-brand-600"
+-          >
+-            Explorer le catalogue
+-          </button>
+-          <a
+-            href="#grades"
+-            className="text-sm font-medium text-ink-soft transition hover:text-ink"
+-          >
+-            Comment on grade nos produits →
+-          </a>
+-        </div>
+-      </section>
++      <Hero />
+ 
+-      {/* Trust strip */}
+-      <section className="border-y border-line bg-surface-muted">
+-        <div className="mx-auto grid max-w-6xl grid-cols-2 gap-y-8 px-6 py-10 sm:grid-cols-4 sm:gap-0">
+-          {TRUST_ITEMS.map((item, i) => (
+-            <div
+-              key={item.label}
+-              className={`px-2 sm:px-6 ${i > 0 ? 'sm:border-l sm:border-line' : ''}`}
+-            >
+-              <p className="font-display text-2xl font-medium text-ink">{item.value}</p>
+-              <p className="mt-1 text-sm text-ink-soft">{item.label}</p>
+-            </div>
+-          ))}
+-        </div>
+-      </section>
++      <ProductRail
++        eyebrow="Sélection"
++        title="Nos meilleures ventes"
++        // NB : pas de compteur de ventes en base pour l'instant → tri de repli.
++        // À remplacer par un vrai tri "salesCount" côté backend si vous
++        // ajoutez ce champ avant la soutenance.
++        sort="id,asc"
++      />
++
++      <ProductRail
++        eyebrow="Fraîchement arrivé"
++        title="Nouveaux produits"
++        sort="createdAt,desc"
++      />
+ 
+       {/* Category showcase */}
+-      <section className="mx-auto max-w-6xl px-6 py-20">
+-        <p className="eyebrow mb-3">Catégories</p>
+-        <h2 className="font-display text-3xl font-medium text-ink">Achetez par catégorie</h2>
+-        <div className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
+-          {CATEGORIES.map((cat) => (
+-            <button
+-              key={cat.id}
+-              onClick={() => scrollToCatalogue(cat.id)}
+-              className="group flex aspect-[4/3] flex-col justify-end border border-line p-5 text-left transition hover:border-ink"
+-            >
+-              <span className="font-display text-lg font-medium text-ink">{cat.label}</span>
+-              <span className="mt-1 text-xs text-ink-soft transition group-hover:text-brand-600">
+-                Voir les produits →
+-              </span>
+-            </button>
+-          ))}
++      <section id="categories" className="scroll-mt-20 border-t border-line bg-surface-muted">
++        <div className="mx-auto max-w-6xl px-6 py-20">
++          <p className="eyebrow mb-3">Catégories</p>
++          <h2 className="font-display text-3xl font-medium text-ink">Achetez par catégorie</h2>
++          <div className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
++            {CATEGORIES.map((cat) => (
++              <Link
++                key={cat.id}
++                to={`/boutique?category=${cat.id}`}
++                className="group flex aspect-[4/3] flex-col justify-end border border-line bg-surface p-5 text-left transition hover:border-ink"
++              >
++                <span className="font-display text-lg font-medium text-ink">{cat.label}</span>
++                <span className="mt-1 text-xs text-ink-soft transition group-hover:text-brand-600">
++                  Voir les produits →
++                </span>
++              </Link>
++            ))}
++          </div>
+         </div>
+       </section>
+ 
+-      {/* Grade explainer — signature element */}
+-      <section id="grades" className="border-t border-line bg-surface-muted">
++      {/* Grade explainer */}
++      <section id="grades" className="border-t border-line">
+         <div className="mx-auto max-w-6xl px-6 py-20">
+           <p className="eyebrow mb-3">Nos grades</p>
+           <h2 className="max-w-xl font-display text-3xl font-medium text-ink">
+@@ -114,27 +65,6 @@ export default function HomePage() {
+           </div>
+         </div>
+       </section>
+-
+-      {/* Catalogue */}
+-      <section ref={catalogueRef} className="mx-auto max-w-6xl scroll-mt-20 px-6 py-20">
+-        <div className="mb-10 flex flex-col gap-5">
+-          <div>
+-            <p className="eyebrow mb-3">Catalogue</p>
+-            <h2 className="font-display text-3xl font-medium text-ink">Tous les produits</h2>
+-          </div>
+-          <CategoryFilter value={category} onChange={handleCategoryChange} />
+-        </div>
+-
+-        {isLoading && <LoadingSpinner label="Chargement du catalogue…" />}
+-        {isError && <ErrorBanner message="Impossible de charger le catalogue." />}
+-
+-        {data && (
+-          <>
+-            <ProductGrid products={data.content} />
+-            <Pagination page={page} totalPages={data.totalPages} onPageChange={setPage} />
+-          </>
+-        )}
+-      </section>
+     </div>
+   )
+ }
+diff --git a/frontend/src/pages/ShopPage.jsx b/frontend/src/pages/ShopPage.jsx
+new file mode 100644
+index 0000000..d4d20d6
+--- /dev/null
++++ b/frontend/src/pages/ShopPage.jsx
+@@ -0,0 +1,50 @@
++import { useState } from 'react'
++import { useSearchParams } from 'react-router-dom'
++import { useProducts } from '../hooks/useProducts'
++import ProductGrid from '../components/catalogue/ProductGrid'
++import CategoryFilter from '../components/catalogue/CategoryFilter'
++import Pagination from '../components/common/Pagination'
++import LoadingSpinner from '../components/common/LoadingSpinner'
++import ErrorBanner from '../components/common/ErrorBanner'
++
++export default function ShopPage() {
++  const [searchParams] = useSearchParams()
++  const initialCategory = searchParams.get('category') || ''
++
++  const [category, setCategory] = useState(initialCategory)
++  const [page, setPage] = useState(0)
++
++  const { data, isLoading, isError } = useProducts({ category, page })
++
++  const handleCategoryChange = (cat) => {
++    setCategory(cat)
++    setPage(0)
++  }
++
++  return (
++    <div className="mx-auto max-w-6xl px-6 py-14">
++      <p className="eyebrow mb-3">Boutique</p>
++      <h1 className="font-display text-4xl font-medium text-ink">Tous les produits</h1>
++      <p className="mt-3 max-w-lg text-sm leading-relaxed text-ink-soft">
++        Chaque référence est vendue par grade (état) avec un prix ajusté en
++        continu selon la demande et le stock disponible.
++      </p>
++
++      <div className="mt-10">
++        <CategoryFilter value={category} onChange={handleCategoryChange} />
++      </div>
++
++      <div className="mt-10">
++        {isLoading && <LoadingSpinner label="Chargement du catalogue…" />}
++        {isError && <ErrorBanner message="Impossible de charger le catalogue." />}
++
++        {data && (
++          <>
++            <ProductGrid products={data.content} />
++            <Pagination page={page} totalPages={data.totalPages} onPageChange={setPage} />
++          </>
++        )}
++      </div>
++    </div>
++  )
++}
+diff --git a/frontend/src/routes/AppRouter.jsx b/frontend/src/routes/AppRouter.jsx
+index 1de36f7..377ba2e 100644
+--- a/frontend/src/routes/AppRouter.jsx
++++ b/frontend/src/routes/AppRouter.jsx
+@@ -1,10 +1,11 @@
+-import { Routes, Route } from 'react-router-dom'
++import { Routes, Route, useLocation } from 'react-router-dom'
+ import Navbar from '../components/common/Navbar'
+ import Footer from '../components/common/Footer'
+ import ProtectedRoute from '../components/common/ProtectedRoute'
+ import AdminRoute from '../components/common/AdminRoute'
+ 
+ import HomePage from '../pages/HomePage'
++import ShopPage from '../pages/ShopPage'
+ import ProductDetailPage from '../pages/ProductDetailPage'
+ import CartPage from '../pages/CartPage'
+ import OrderConfirmationPage from '../pages/OrderConfirmationPage'
+@@ -18,12 +19,18 @@ import AdminProductsPage from '../pages/admin/AdminProductsPage'
+ import AdminPricingHistoryPage from '../pages/admin/AdminPricingHistoryPage'
+ 
+ export default function AppRouter() {
++  const location = useLocation()
++  // Le hero de la home passe sous la navbar transparente ; les autres pages
++  // (fond clair dès le haut) ont besoin d'un padding pour ne pas passer dessous.
++  const needsTopPadding = location.pathname !== '/'
++
+   return (
+     <div className="flex min-h-screen flex-col">
+       <Navbar />
+-      <div className="flex-1">
++      <div className={`flex-1 ${needsTopPadding ? 'pt-20' : ''}`}>
+         <Routes>
+           <Route path="/" element={<HomePage />} />
++          <Route path="/boutique" element={<ShopPage />} />
+           <Route path="/products/:id" element={<ProductDetailPage />} />
+           <Route path="/cart" element={<CartPage />} />
+           <Route path="/login" element={<LoginPage />} />

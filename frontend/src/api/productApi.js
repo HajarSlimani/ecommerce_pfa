@@ -1,9 +1,9 @@
 import axiosInstance from './axiosInstance'
 
 export const productApi = {
-  list: ({ category, page = 0, size = 12 } = {}) =>
+  list: ({ category, page = 0, size = 12, sort } = {}) =>
     axiosInstance
-      .get('/products', { params: { category: category || undefined, page, size } })
+      .get('/products', { params: { category: category || undefined, page, size, sort } })
       .then((r) => r.data),
 
   getDetail: (id) => axiosInstance.get(`/products/${id}`).then((r) => r.data),
