@@ -26,6 +26,26 @@ public class ProductController {
         return ResponseEntity.ok(productService.listProducts(category, pageable));
     }
 
+    /**
+     * Endpoint dédié à la Boutique : filtre catégorie + grade + texte libre,
+     * tri, et prix minimum par produit — contrairement à {@link #list}, qui
+     * reste un simple listing sans jointure vers les unités/prix.
+     *
+     * @param grade code exact de l'enum Grade ("NEUF", "A", "B", "C")
+     * @param q     texte libre, recherché dans le nom et la marque
+     * @param sort  "price_asc" | "price_desc" | "newest" | (vide = ordre par défaut)
+     */
+    @GetMapping("/search")
+    public ResponseEntity<PageResponse<ProductDTO>> search(
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String grade,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String sort,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "12") int size) {
+        return ResponseEntity.ok(productService.searchProducts(category, grade, q, sort, page, size));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ProductDetailDTO> getDetail(@PathVariable Long id) {
         return ResponseEntity.ok(productService.getProductDetail(id));

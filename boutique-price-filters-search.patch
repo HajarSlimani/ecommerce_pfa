@@ -1,0 +1,511 @@
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java b/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java
+index 24026df..aa87e78 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java
+@@ -26,6 +26,26 @@ public class ProductController {
+         return ResponseEntity.ok(productService.listProducts(category, pageable));
+     }
+ 
++    /**
++     * Endpoint dédié à la Boutique : filtre catégorie + grade + texte libre,
++     * tri, et prix minimum par produit — contrairement à {@link #list}, qui
++     * reste un simple listing sans jointure vers les unités/prix.
++     *
++     * @param grade code exact de l'enum Grade ("NEUF", "A", "B", "C")
++     * @param q     texte libre, recherché dans le nom et la marque
++     * @param sort  "price_asc" | "price_desc" | "newest" | (vide = ordre par défaut)
++     */
++    @GetMapping("/search")
++    public ResponseEntity<PageResponse<ProductDTO>> search(
++            @RequestParam(required = false) String category,
++            @RequestParam(required = false) String grade,
++            @RequestParam(required = false) String q,
++            @RequestParam(required = false) String sort,
++            @RequestParam(defaultValue = "0") int page,
++            @RequestParam(defaultValue = "12") int size) {
++        return ResponseEntity.ok(productService.searchProducts(category, grade, q, sort, page, size));
++    }
++
+     @GetMapping("/{id}")
+     public ResponseEntity<ProductDetailDTO> getDetail(@PathVariable Long id) {
+         return ResponseEntity.ok(productService.getProductDetail(id));
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDTO.java b/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDTO.java
+index cb4624f..ddd1bb0 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDTO.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDTO.java
+@@ -6,6 +6,8 @@ import lombok.Getter;
+ import lombok.NoArgsConstructor;
+ import lombok.Setter;
+ 
++import java.math.BigDecimal;
++
+ /**
+  * @NoArgsConstructor + @Setter sont nécessaires même si le code applicatif
+  * n'utilise que le @Builder : ce DTO est mis en cache dans Redis via Jackson
+@@ -26,4 +28,13 @@ public class ProductDTO {
+     private String brand;
+     private String category;
+     private String imageUrl;
++
++    /**
++     * Prix le plus bas parmi les unités disponibles (toutes couleurs, filtré
++     * par grade si un grade est demandé). Null si aucune unité disponible.
++     * Uniquement renseigné par {@link com.ecommerce.catalogue.service.ProductService#searchProducts}
++     * — reste null sur le endpoint /products classique (listing simple, pas
++     * de jointure vers les unités) pour ne pas changer son comportement.
++     */
++    private BigDecimal minPrice;
+ }
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/repository/ProductRepository.java b/backend/src/main/java/com/ecommerce/catalogue/repository/ProductRepository.java
+index dade9b0..5fb765f 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/repository/ProductRepository.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/repository/ProductRepository.java
+@@ -4,7 +4,79 @@ import com.ecommerce.catalogue.entity.Product;
+ import org.springframework.data.domain.Page;
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.repository.query.Param;
++
++import java.math.BigDecimal;
+ 
+ public interface ProductRepository extends JpaRepository<Product, Long> {
+     Page<Product> findByCategory(String category, Pageable pageable);
++
++    /**
++     * Recherche filtrée pour la Boutique : catégorie, grade (au moins une
++     * unité disponible de ce grade), texte libre (nom/marque), triée par
++     * prix ou nouveauté. Requête native (pas JPQL) car on a besoin d'un
++     * ORDER BY piloté par paramètre sur un alias calculé (prix min via CTE),
++     * ce que l'ORM ne gère pas bien en JPQL/Pageable classique.
++     *
++     * Chaque paramètre optionnel (:category, :grade, :search, :sort) est
++     * géré via le pattern "(:param IS NULL OR ...)" — passer null plutôt
++     * qu'une chaîne vide pour désactiver un filtre (voir
++     * ProductService#blankToNull).
++     */
++    @Query(value = """
++            WITH product_min_price AS (
++                SELECT product_id, MIN(current_price) AS min_price
++                FROM product_units
++                WHERE status = 'AVAILABLE'
++                  AND (:grade IS NULL OR grade = :grade)
++                GROUP BY product_id
++            )
++            SELECT p.id AS id, p.name AS name, p.description AS description,
++                   p.brand AS brand, p.category AS category, p.image_url AS "imageUrl",
++                   pmp.min_price AS "minPrice"
++            FROM products p
++            LEFT JOIN product_min_price pmp ON pmp.product_id = p.id
++            WHERE (:category IS NULL OR p.category = :category)
++              AND (:search IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', CAST(:search AS text), '%'))
++                                    OR LOWER(p.brand) LIKE LOWER(CONCAT('%', CAST(:search AS text), '%')))
++              AND (:grade IS NULL OR pmp.product_id IS NOT NULL)
++            ORDER BY
++              CASE WHEN :sort = 'price_asc' THEN pmp.min_price END ASC NULLS LAST,
++              CASE WHEN :sort = 'price_desc' THEN pmp.min_price END DESC NULLS LAST,
++              CASE WHEN :sort = 'newest' THEN p.created_at END DESC,
++              p.id ASC
++            """,
++            countQuery = """
++            WITH product_min_price AS (
++                SELECT product_id, MIN(current_price) AS min_price
++                FROM product_units
++                WHERE status = 'AVAILABLE'
++                  AND (:grade IS NULL OR grade = :grade)
++                GROUP BY product_id
++            )
++            SELECT COUNT(*)
++            FROM products p
++            LEFT JOIN product_min_price pmp ON pmp.product_id = p.id
++            WHERE (:category IS NULL OR p.category = :category)
++              AND (:search IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', CAST(:search AS text), '%'))
++                                    OR LOWER(p.brand) LIKE LOWER(CONCAT('%', CAST(:search AS text), '%')))
++              AND (:grade IS NULL OR pmp.product_id IS NOT NULL)
++            """,
++            nativeQuery = true)
++    Page<ProductSearchProjection> search(@Param("category") String category,
++                                          @Param("grade") String grade,
++                                          @Param("search") String search,
++                                          @Param("sort") String sort,
++                                          Pageable pageable);
++
++    interface ProductSearchProjection {
++        Long getId();
++        String getName();
++        String getDescription();
++        String getBrand();
++        String getCategory();
++        String getImageUrl();
++        BigDecimal getMinPrice();
++    }
+ }
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java b/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
+index 1506dd2..96fac9d 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
+@@ -39,6 +39,38 @@ public class ProductService {
+         return PageResponse.from(page, this::toDTO);
+     }
+ 
++    /**
++     * Recherche filtrée pour la Boutique (catégorie, grade, texte libre, tri).
++     * Volontairement NON mise en cache : contrairement à listProducts, le
++     * résultat inclut un prix (minPrice) qui change en continu avec le
++     * pricing dynamique — mettre ça en cache reviendrait à afficher des prix
++     * potentiellement obsolètes, ce qui est particulièrement mauvais vu que
++     * le pricing dynamique est l'argument central du projet.
++     */
++    public PageResponse<ProductDTO> searchProducts(String category, String grade, String search,
++                                                     String sort, int page, int size) {
++        Pageable pageable = org.springframework.data.domain.PageRequest.of(page, size);
++        Page<ProductRepository.ProductSearchProjection> results = productRepository.search(
++                blankToNull(category), blankToNull(grade), blankToNull(search), blankToNull(sort), pageable);
++        return PageResponse.from(results, this::fromProjection);
++    }
++
++    private String blankToNull(String s) {
++        return (s == null || s.isBlank()) ? null : s;
++    }
++
++    private ProductDTO fromProjection(ProductRepository.ProductSearchProjection p) {
++        return ProductDTO.builder()
++                .id(p.getId())
++                .name(p.getName())
++                .description(p.getDescription())
++                .brand(p.getBrand())
++                .category(p.getCategory())
++                .imageUrl(p.getImageUrl())
++                .minPrice(p.getMinPrice())
++                .build();
++    }
++
+     /**
+      * Fiche produit détaillée + variantes disponibles (une par combinaison
+      * grade+couleur en stock).
+diff --git a/frontend/src/api/productApi.js b/frontend/src/api/productApi.js
+index aaf85dc..efeb6ea 100644
+--- a/frontend/src/api/productApi.js
++++ b/frontend/src/api/productApi.js
+@@ -6,6 +6,23 @@ export const productApi = {
+       .get('/products', { params: { category: category || undefined, page, size, sort } })
+       .then((r) => r.data),
+ 
++  // Endpoint dédié Boutique : filtre grade + recherche texte + tri par prix,
++  // avec minPrice calculé — le endpoint /products classique ne fait pas la
++  // jointure vers les unités donc ne renvoie pas de prix.
++  search: ({ category, grade, q, sort, page = 0, size = 12 } = {}) =>
++    axiosInstance
++      .get('/products/search', {
++        params: {
++          category: category || undefined,
++          grade: grade || undefined,
++          q: q || undefined,
++          sort: sort || undefined,
++          page,
++          size,
++        },
++      })
++      .then((r) => r.data),
++
+   getDetail: (id) => axiosInstance.get(`/products/${id}`).then((r) => r.data),
+ 
+   create: (data) => axiosInstance.post('/products', data).then((r) => r.data),
+diff --git a/frontend/src/components/catalogue/GradeFilter.jsx b/frontend/src/components/catalogue/GradeFilter.jsx
+new file mode 100644
+index 0000000..bcb607e
+--- /dev/null
++++ b/frontend/src/components/catalogue/GradeFilter.jsx
+@@ -0,0 +1,32 @@
++import { GRADES } from '../../constants/catalogue'
++
++export default function GradeFilter({ value, onChange }) {
++  return (
++    <div className="flex flex-wrap gap-2">
++      <button
++        onClick={() => onChange('')}
++        className={`border px-3 py-1 font-mono text-xs uppercase tracking-wide transition ${
++          value === ''
++            ? 'border-ink text-ink'
++            : 'border-line text-ink-soft hover:border-ink-soft hover:text-ink'
++        }`}
++      >
++        Tous grades
++      </button>
++      {GRADES.map((g) => (
++        <button
++          key={g.code}
++          onClick={() => onChange(g.code)}
++          title={g.desc}
++          className={`border px-3 py-1 font-mono text-xs uppercase tracking-wide transition ${
++            value === g.code
++              ? 'border-ink text-ink'
++              : 'border-line text-ink-soft hover:border-ink-soft hover:text-ink'
++          }`}
++        >
++          {g.code}
++        </button>
++      ))}
++    </div>
++  )
++}
+diff --git a/frontend/src/components/catalogue/ProductCard.jsx b/frontend/src/components/catalogue/ProductCard.jsx
+index 6229f7b..6e1b891 100644
+--- a/frontend/src/components/catalogue/ProductCard.jsx
++++ b/frontend/src/components/catalogue/ProductCard.jsx
+@@ -1,4 +1,5 @@
+ import { Link } from 'react-router-dom'
++import PriceTag from '../common/PriceTag'
+ 
+ export default function ProductCard({ product }) {
+   return (
+@@ -19,9 +20,20 @@ export default function ProductCard({ product }) {
+       <div className="flex flex-1 flex-col gap-1 pt-4">
+         <span className="eyebrow">{product.brand}</span>
+         <h3 className="font-display text-base font-normal leading-snug text-ink">{product.name}</h3>
+-        <span className="mt-2 text-xs text-ink-soft transition group-hover:text-brand-600">
+-          Voir les grades disponibles →
+-        </span>
++
++        {/* minPrice n'est renseigné que par l'endpoint /products/search
++            (Boutique) — sur la home (Hero/rails), le champ est absent et on
++            garde l'ancien texte d'appel à l'action. */}
++        {product.minPrice != null ? (
++          <div className="mt-2 flex items-baseline gap-1.5">
++            <span className="text-xs text-ink-soft">Dès</span>
++            <PriceTag price={product.minPrice} size="sm" />
++          </div>
++        ) : (
++          <span className="mt-2 text-xs text-ink-soft transition group-hover:text-brand-600">
++            Voir les grades disponibles →
++          </span>
++        )}
+       </div>
+     </Link>
+   )
+diff --git a/frontend/src/components/catalogue/ProductGridSkeleton.jsx b/frontend/src/components/catalogue/ProductGridSkeleton.jsx
+new file mode 100644
+index 0000000..0dcfd00
+--- /dev/null
++++ b/frontend/src/components/catalogue/ProductGridSkeleton.jsx
+@@ -0,0 +1,16 @@
++export default function ProductGridSkeleton({ count = 8 }) {
++  return (
++    <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4">
++      {Array.from({ length: count }).map((_, i) => (
++        <div key={i} className="animate-pulse">
++          <div className="aspect-square border-b border-line bg-surface-sunken" />
++          <div className="pt-4">
++            <div className="h-2.5 w-16 bg-surface-sunken" />
++            <div className="mt-2.5 h-4 w-3/4 bg-surface-sunken" />
++            <div className="mt-3 h-3 w-20 bg-surface-sunken" />
++          </div>
++        </div>
++      ))}
++    </div>
++  )
++}
+diff --git a/frontend/src/components/catalogue/SortSelect.jsx b/frontend/src/components/catalogue/SortSelect.jsx
+new file mode 100644
+index 0000000..030ff0b
+--- /dev/null
++++ b/frontend/src/components/catalogue/SortSelect.jsx
+@@ -0,0 +1,22 @@
++const OPTIONS = [
++  { value: '', label: 'Pertinence' },
++  { value: 'newest', label: 'Nouveautés' },
++  { value: 'price_asc', label: 'Prix croissant' },
++  { value: 'price_desc', label: 'Prix décroissant' },
++]
++
++export default function SortSelect({ value, onChange }) {
++  return (
++    <select
++      value={value}
++      onChange={(e) => onChange(e.target.value)}
++      className="border border-line bg-surface px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-soft transition hover:border-ink-soft focus:border-ink focus:outline-none"
++    >
++      {OPTIONS.map((o) => (
++        <option key={o.value} value={o.value}>
++          {o.label}
++        </option>
++      ))}
++    </select>
++  )
++}
+diff --git a/frontend/src/hooks/useProducts.js b/frontend/src/hooks/useProducts.js
+index b7444d9..d5cdb57 100644
+--- a/frontend/src/hooks/useProducts.js
++++ b/frontend/src/hooks/useProducts.js
+@@ -8,6 +8,18 @@ export function useProducts({ category, page = 0, size = 12, sort } = {}) {
+   })
+ }
+ 
++// Séparé de useProducts : tape sur /products/search (grade + recherche texte
++// + prix), volontairement pas mis en cache côté backend puisque le prix
++// bouge en continu. keepPreviousData évite un flash de loading à chaque
++// changement de filtre/tri/page.
++export function useProductSearch({ category, grade, q, sort, page = 0, size = 12 } = {}) {
++  return useQuery({
++    queryKey: ['productSearch', category, grade, q, sort, page, size],
++    queryFn: () => productApi.search({ category, grade, q, sort, page, size }),
++    placeholderData: (prev) => prev,
++  })
++}
++
+ export function useProductDetail(productId) {
+   return useQuery({
+     queryKey: ['product', productId],
+diff --git a/frontend/src/pages/ShopPage.jsx b/frontend/src/pages/ShopPage.jsx
+index d4d20d6..2830315 100644
+--- a/frontend/src/pages/ShopPage.jsx
++++ b/frontend/src/pages/ShopPage.jsx
+@@ -1,24 +1,63 @@
+-import { useState } from 'react'
++import { useState, useEffect } from 'react'
+ import { useSearchParams } from 'react-router-dom'
+-import { useProducts } from '../hooks/useProducts'
++import { X } from 'lucide-react'
++import { useProductSearch } from '../hooks/useProducts'
++import { CATEGORIES, GRADES } from '../constants/catalogue'
+ import ProductGrid from '../components/catalogue/ProductGrid'
++import ProductGridSkeleton from '../components/catalogue/ProductGridSkeleton'
+ import CategoryFilter from '../components/catalogue/CategoryFilter'
++import GradeFilter from '../components/catalogue/GradeFilter'
++import SortSelect from '../components/catalogue/SortSelect'
+ import Pagination from '../components/common/Pagination'
+-import LoadingSpinner from '../components/common/LoadingSpinner'
+ import ErrorBanner from '../components/common/ErrorBanner'
+ 
+ export default function ShopPage() {
+-  const [searchParams] = useSearchParams()
+-  const initialCategory = searchParams.get('category') || ''
++  const [searchParams, setSearchParams] = useSearchParams()
+ 
+-  const [category, setCategory] = useState(initialCategory)
++  const [category, setCategory] = useState(searchParams.get('category') || '')
++  const [grade, setGrade] = useState(searchParams.get('grade') || '')
++  const [sort, setSort] = useState(searchParams.get('sort') || '')
++  const [qInput, setQInput] = useState(searchParams.get('q') || '')
++  const [q, setQ] = useState(searchParams.get('q') || '')
+   const [page, setPage] = useState(0)
+ 
+-  const { data, isLoading, isError } = useProducts({ category, page })
++  // Debounce : on évite de tirer une requête à chaque frappe.
++  useEffect(() => {
++    const t = setTimeout(() => setQ(qInput.trim()), 400)
++    return () => clearTimeout(t)
++  }, [qInput])
+ 
+-  const handleCategoryChange = (cat) => {
+-    setCategory(cat)
++  // Filtres partagables par URL, sans polluer l'historique de navigation.
++  useEffect(() => {
++    const params = {}
++    if (category) params.category = category
++    if (grade) params.grade = grade
++    if (sort) params.sort = sort
++    if (q) params.q = q
++    setSearchParams(params, { replace: true })
++  }, [category, grade, sort, q]) // eslint-disable-line react-hooks/exhaustive-deps
++
++  useEffect(() => {
+     setPage(0)
++  }, [category, grade, sort, q])
++
++  const { data, isLoading, isFetching, isError } = useProductSearch({ category, grade, q, sort, page })
++
++  const categoryLabel = CATEGORIES.find((c) => c.id === category)?.label
++  const gradeLabel = GRADES.find((g) => g.code === grade)?.label
++
++  const activeFilters = [
++    category && { key: 'category', label: categoryLabel, clear: () => setCategory('') },
++    grade && { key: 'grade', label: gradeLabel, clear: () => setGrade('') },
++    q && { key: 'q', label: `« ${q} »`, clear: () => { setQInput(''); setQ('') } },
++  ].filter(Boolean)
++
++  const clearAll = () => {
++    setCategory('')
++    setGrade('')
++    setQInput('')
++    setQ('')
++    setSort('')
+   }
+ 
+   return (
+@@ -30,20 +69,66 @@ export default function ShopPage() {
+         continu selon la demande et le stock disponible.
+       </p>
+ 
+-      <div className="mt-10">
+-        <CategoryFilter value={category} onChange={handleCategoryChange} />
++      {/* Barre de filtres */}
++      <div className="sticky top-20 z-10 -mx-6 mt-10 border-y border-line bg-surface/95 px-6 py-4 backdrop-blur-sm">
++        <div className="flex flex-col gap-4">
++          <div className="flex flex-wrap items-center justify-between gap-4">
++            <CategoryFilter value={category} onChange={setCategory} />
++            <input
++              type="text"
++              value={qInput}
++              onChange={(e) => setQInput(e.target.value)}
++              placeholder="Rechercher un produit…"
++              className="w-full max-w-[220px] border-b border-line bg-transparent py-1 text-sm text-ink placeholder:text-ink-soft focus:border-ink focus:outline-none"
++            />
++          </div>
++          <div className="flex flex-wrap items-center justify-between gap-4">
++            <GradeFilter value={grade} onChange={setGrade} />
++            <SortSelect value={sort} onChange={setSort} />
++          </div>
++        </div>
+       </div>
+ 
+-      <div className="mt-10">
+-        {isLoading && <LoadingSpinner label="Chargement du catalogue…" />}
++      {/* Chips de filtres actifs */}
++      {activeFilters.length > 0 && (
++        <div className="mt-5 flex flex-wrap items-center gap-2">
++          {activeFilters.map((f) => (
++            <button
++              key={f.key}
++              onClick={f.clear}
++              className="flex items-center gap-1.5 border border-line px-2.5 py-1 text-xs text-ink-soft transition hover:border-ink hover:text-ink"
++            >
++              {f.label}
++              <X size={12} />
++            </button>
++          ))}
++          <button onClick={clearAll} className="text-xs text-ink-soft underline transition hover:text-ink">
++            Réinitialiser
++          </button>
++        </div>
++      )}
++
++      {/* Compteur de résultats */}
++      <div className="mt-8 flex items-center justify-between">
++        <p className="text-sm text-ink-soft">
++          {isLoading
++            ? ' '
++            : `${data?.totalElements ?? 0} produit${(data?.totalElements ?? 0) > 1 ? 's' : ''}`}
++        </p>
++      </div>
++
++      <div className="mt-4">
+         {isError && <ErrorBanner message="Impossible de charger le catalogue." />}
+ 
+-        {data && (
+-          <>
+-            <ProductGrid products={data.content} />
+-            <Pagination page={page} totalPages={data.totalPages} onPageChange={setPage} />
+-          </>
++        {isLoading ? (
++          <ProductGridSkeleton />
++        ) : (
++          <div className={isFetching ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
++            <ProductGrid products={data?.content} />
++          </div>
+         )}
++
++        {data && <Pagination page={page} totalPages={data.totalPages} onPageChange={setPage} />}
+       </div>
+     </div>
+   )

@@ -40,6 +40,38 @@ public class ProductService {
     }
 
     /**
+     * Recherche filtrée pour la Boutique (catégorie, grade, texte libre, tri).
+     * Volontairement NON mise en cache : contrairement à listProducts, le
+     * résultat inclut un prix (minPrice) qui change en continu avec le
+     * pricing dynamique — mettre ça en cache reviendrait à afficher des prix
+     * potentiellement obsolètes, ce qui est particulièrement mauvais vu que
+     * le pricing dynamique est l'argument central du projet.
+     */
+    public PageResponse<ProductDTO> searchProducts(String category, String grade, String search,
+                                                     String sort, int page, int size) {
+        Pageable pageable = org.springframework.data.domain.PageRequest.of(page, size);
+        Page<ProductRepository.ProductSearchProjection> results = productRepository.search(
+                blankToNull(category), blankToNull(grade), blankToNull(search), blankToNull(sort), pageable);
+        return PageResponse.from(results, this::fromProjection);
+    }
+
+    private String blankToNull(String s) {
+        return (s == null || s.isBlank()) ? null : s;
+    }
+
+    private ProductDTO fromProjection(ProductRepository.ProductSearchProjection p) {
+        return ProductDTO.builder()
+                .id(p.getId())
+                .name(p.getName())
+                .description(p.getDescription())
+                .brand(p.getBrand())
+                .category(p.getCategory())
+                .imageUrl(p.getImageUrl())
+                .minPrice(p.getMinPrice())
+                .build();
+    }
+
+    /**
      * Fiche produit détaillée + variantes disponibles (une par combinaison
      * grade+couleur en stock).
      * Cache court (2 min) car le stock/prix change fréquemment avec le pricing dynamique.

@@ -6,6 +6,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigDecimal;
+
 /**
  * @NoArgsConstructor + @Setter sont nécessaires même si le code applicatif
  * n'utilise que le @Builder : ce DTO est mis en cache dans Redis via Jackson
@@ -26,4 +28,13 @@ public class ProductDTO {
     private String brand;
     private String category;
     private String imageUrl;
+
+    /**
+     * Prix le plus bas parmi les unités disponibles (toutes couleurs, filtré
+     * par grade si un grade est demandé). Null si aucune unité disponible.
+     * Uniquement renseigné par {@link com.ecommerce.catalogue.service.ProductService#searchProducts}
+     * — reste null sur le endpoint /products classique (listing simple, pas
+     * de jointure vers les unités) pour ne pas changer son comportement.
+     */
+    private BigDecimal minPrice;
 }

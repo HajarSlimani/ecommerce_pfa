@@ -170,7 +170,7 @@ public class DataSeeder implements CommandLineRunner {
                         )),
                 new SeedProduct("Google Pixel 6", "Google", "smartphones",
                         "Smartphone Android reconditionné, 128GB.",
-                        "https://images.unsplash.com/photo-1598965675045-45c5e72c7d05?w=800&q=80",
+                        "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR0Hk0eON80jj1TSGXVC1w5f1BaIE2ULOFldOgwX4g9d0r81Y5ngfzI2hA&s=10",
                         List.of(
                                 new GradeDef(Grade.A, new BigDecimal("340.00"), 4),
                                 new GradeDef(Grade.B, new BigDecimal("280.00"), 5),
