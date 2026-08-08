@@ -1,0 +1,22 @@
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java b/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
+index b085313..e0029d1 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
+@@ -162,7 +162,16 @@ public class ProductService {
+                 .brand(product.getBrand())
+                 .category(product.getCategory())
+                 .imageUrl(product.getImageUrl())
+-                .colorImages(product.getColorImages())
++                // copie défensive en HashMap simple : product.getColorImages() est un
++                // Map "vivant" géré par Hibernate (PersistentMap), pas un
++                // java.util.HashMap classique. Le sérialiseur Redis
++                // (GenericJackson2JsonRedisSerializer) enregistre le type EXACT de
++                // chaque objet mis en cache pour pouvoir le reconstruire — s'il
++                // enregistre "PersistentMap", la désérialisation échoue au cache hit
++                // suivant, car cette classe interne d'Hibernate n'est pas
++                // instanciable hors d'une session. D'où le bug "marche au 1er appel,
++                // casse au 2e (une fois en cache)".
++                .colorImages(new java.util.HashMap<>(product.getColorImages()))
+                 .build();
+     }
+ }

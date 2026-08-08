@@ -3,8 +3,8 @@ package com.ecommerce.commande.controller;
 import com.ecommerce.auth.UserPrincipal;
 import com.ecommerce.commande.dto.OrderDTO;
 import com.ecommerce.commande.service.OrderService;
+import com.ecommerce.common.dto.PageResponse;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -28,7 +28,7 @@ public class OrderController {
     }
 
     @GetMapping("/user/{userId}")
-    public ResponseEntity<Page<OrderDTO>> getOrdersForUser(@AuthenticationPrincipal UserPrincipal principal,
+    public ResponseEntity<PageResponse<OrderDTO>> getOrdersForUser(@AuthenticationPrincipal UserPrincipal principal,
                                                             @PathVariable Long userId, Pageable pageable) {
         return ResponseEntity.ok(orderService.getOrdersForUser(userId, principal, pageable));
     }

@@ -1,0 +1,97 @@
+diff --git a/backend/src/main/java/com/ecommerce/commande/controller/OrderController.java b/backend/src/main/java/com/ecommerce/commande/controller/OrderController.java
+index 92d7e60..999f82d 100644
+--- a/backend/src/main/java/com/ecommerce/commande/controller/OrderController.java
++++ b/backend/src/main/java/com/ecommerce/commande/controller/OrderController.java
+@@ -3,8 +3,8 @@ package com.ecommerce.commande.controller;
+ import com.ecommerce.auth.UserPrincipal;
+ import com.ecommerce.commande.dto.OrderDTO;
+ import com.ecommerce.commande.service.OrderService;
++import com.ecommerce.common.dto.PageResponse;
+ import lombok.RequiredArgsConstructor;
+-import org.springframework.data.domain.Page;
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.http.ResponseEntity;
+ import org.springframework.security.core.annotation.AuthenticationPrincipal;
+@@ -28,7 +28,7 @@ public class OrderController {
+     }
+ 
+     @GetMapping("/user/{userId}")
+-    public ResponseEntity<Page<OrderDTO>> getOrdersForUser(@AuthenticationPrincipal UserPrincipal principal,
++    public ResponseEntity<PageResponse<OrderDTO>> getOrdersForUser(@AuthenticationPrincipal UserPrincipal principal,
+                                                             @PathVariable Long userId, Pageable pageable) {
+         return ResponseEntity.ok(orderService.getOrdersForUser(userId, principal, pageable));
+     }
+diff --git a/backend/src/main/java/com/ecommerce/commande/service/OrderService.java b/backend/src/main/java/com/ecommerce/commande/service/OrderService.java
+index feac4ed..eca6a12 100644
+--- a/backend/src/main/java/com/ecommerce/commande/service/OrderService.java
++++ b/backend/src/main/java/com/ecommerce/commande/service/OrderService.java
+@@ -21,7 +21,6 @@ import com.ecommerce.panier.repository.CartRepository;
+ import lombok.RequiredArgsConstructor;
+ import org.springframework.cache.Cache;
+ import org.springframework.cache.CacheManager;
+-import org.springframework.data.domain.Page;
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.security.access.AccessDeniedException;
+ import org.springframework.stereotype.Service;
+@@ -136,10 +135,11 @@ public class OrderService {
+     }
+ 
+     @Transactional
+-    public Page<OrderDTO> getOrdersForUser(Long userId, UserPrincipal principal, Pageable pageable) {
++    public com.ecommerce.common.dto.PageResponse<OrderDTO> getOrdersForUser(Long userId, UserPrincipal principal, Pageable pageable) {
+         assertOwnerOrAdmin(userId, principal);
+ 
+-        return orderRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable).map(this::toDTO);
++        return com.ecommerce.common.dto.PageResponse.from(
++                orderRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable), this::toDTO);
+     }
+ 
+     /**
+diff --git a/backend/src/main/java/com/ecommerce/pricing/controller/PricingDashboardController.java b/backend/src/main/java/com/ecommerce/pricing/controller/PricingDashboardController.java
+index f027c84..f2a05cf 100644
+--- a/backend/src/main/java/com/ecommerce/pricing/controller/PricingDashboardController.java
++++ b/backend/src/main/java/com/ecommerce/pricing/controller/PricingDashboardController.java
+@@ -1,11 +1,11 @@
+ package com.ecommerce.pricing.controller;
+ 
+ import com.ecommerce.common.enums.Grade;
++import com.ecommerce.common.dto.PageResponse;
+ import com.ecommerce.pricing.dto.PriceHistoryDTO;
+ import com.ecommerce.pricing.dto.RevenueImpactSummaryDTO;
+ import com.ecommerce.pricing.service.PricingDashboardService;
+ import lombok.RequiredArgsConstructor;
+-import org.springframework.data.domain.Page;
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.format.annotation.DateTimeFormat;
+ import org.springframework.http.ResponseEntity;
+@@ -23,7 +23,7 @@ public class PricingDashboardController {
+     private final PricingDashboardService pricingDashboardService;
+ 
+     @GetMapping("/history")
+-    public ResponseEntity<Page<PriceHistoryDTO>> getHistory(
++    public ResponseEntity<PageResponse<PriceHistoryDTO>> getHistory(
+             @RequestParam(required = false) Long productId,
+             Pageable pageable) {
+         return ResponseEntity.ok(pricingDashboardService.getHistory(productId, pageable));
+diff --git a/backend/src/main/java/com/ecommerce/pricing/service/PricingDashboardService.java b/backend/src/main/java/com/ecommerce/pricing/service/PricingDashboardService.java
+index 0360169..5171d01 100644
+--- a/backend/src/main/java/com/ecommerce/pricing/service/PricingDashboardService.java
++++ b/backend/src/main/java/com/ecommerce/pricing/service/PricingDashboardService.java
+@@ -29,7 +29,7 @@ public class PricingDashboardService {
+     private final PricingOrchestratorService pricingOrchestratorService;
+     private final ObjectMapper objectMapper;
+ 
+-    public Page<PriceHistoryDTO> getHistory(Long productId, Pageable pageable) {
++    public com.ecommerce.common.dto.PageResponse<PriceHistoryDTO> getHistory(Long productId, Pageable pageable) {
+         Page<PriceHistory> page = (productId != null)
+                 ? priceHistoryRepository.findByProductIdOrderByCreatedAtDesc(productId, pageable)
+                 : priceHistoryRepository.findAllByOrderByCreatedAtDesc(pageable);
+@@ -39,7 +39,7 @@ public class PricingDashboardService {
+                 .stream()
+                 .collect(java.util.stream.Collectors.toMap(Product::getId, Product::getName));
+ 
+-        return page.map(h -> toDTO(h, productNames.get(h.getProductId())));
++        return com.ecommerce.common.dto.PageResponse.from(page, h -> toDTO(h, productNames.get(h.getProductId())));
+     }
+ 
+     /**

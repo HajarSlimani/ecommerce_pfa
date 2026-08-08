@@ -29,7 +29,7 @@ public class PricingDashboardService {
     private final PricingOrchestratorService pricingOrchestratorService;
     private final ObjectMapper objectMapper;
 
-    public Page<PriceHistoryDTO> getHistory(Long productId, Pageable pageable) {
+    public com.ecommerce.common.dto.PageResponse<PriceHistoryDTO> getHistory(Long productId, Pageable pageable) {
         Page<PriceHistory> page = (productId != null)
                 ? priceHistoryRepository.findByProductIdOrderByCreatedAtDesc(productId, pageable)
                 : priceHistoryRepository.findAllByOrderByCreatedAtDesc(pageable);
@@ -39,7 +39,7 @@ public class PricingDashboardService {
                 .stream()
                 .collect(java.util.stream.Collectors.toMap(Product::getId, Product::getName));
 
-        return page.map(h -> toDTO(h, productNames.get(h.getProductId())));
+        return com.ecommerce.common.dto.PageResponse.from(page, h -> toDTO(h, productNames.get(h.getProductId())));
     }
 
     /**

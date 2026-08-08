@@ -21,7 +21,6 @@ import com.ecommerce.panier.repository.CartRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -136,10 +135,11 @@ public class OrderService {
     }
 
     @Transactional
-    public Page<OrderDTO> getOrdersForUser(Long userId, UserPrincipal principal, Pageable pageable) {
+    public com.ecommerce.common.dto.PageResponse<OrderDTO> getOrdersForUser(Long userId, UserPrincipal principal, Pageable pageable) {
         assertOwnerOrAdmin(userId, principal);
 
-        return orderRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable).map(this::toDTO);
+        return com.ecommerce.common.dto.PageResponse.from(
+                orderRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable), this::toDTO);
     }
 
     /**

@@ -1,11 +1,11 @@
 package com.ecommerce.pricing.controller;
 
 import com.ecommerce.common.enums.Grade;
+import com.ecommerce.common.dto.PageResponse;
 import com.ecommerce.pricing.dto.PriceHistoryDTO;
 import com.ecommerce.pricing.dto.RevenueImpactSummaryDTO;
 import com.ecommerce.pricing.service.PricingDashboardService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -23,7 +23,7 @@ public class PricingDashboardController {
     private final PricingDashboardService pricingDashboardService;
 
     @GetMapping("/history")
-    public ResponseEntity<Page<PriceHistoryDTO>> getHistory(
+    public ResponseEntity<PageResponse<PriceHistoryDTO>> getHistory(
             @RequestParam(required = false) Long productId,
             Pageable pageable) {
         return ResponseEntity.ok(pricingDashboardService.getHistory(productId, pageable));
