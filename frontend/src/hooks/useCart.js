@@ -31,6 +31,19 @@ export function useCart() {
     },
   })
 
+  const updateItemMutation = useMutation({
+    mutationFn: cartApi.updateItem,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cart'] })
+    },
+    onError: (err) => {
+      toast.error(err.response?.data?.message || 'Impossible de modifier la quantité')
+      // Le stock a pu bouger entre-temps (pricing dynamique) : on resynchronise
+      // avec le serveur plutôt que de laisser affiché un état optimiste faux.
+      queryClient.invalidateQueries({ queryKey: ['cart'] })
+    },
+  })
+
   return {
     cart: cartQuery.data,
     isLoading: cartQuery.isLoading,
@@ -38,5 +51,6 @@ export function useCart() {
     addItem: addItemMutation.mutate,
     isAdding: addItemMutation.isPending,
     removeItem: removeItemMutation.mutate,
+    updateItem: updateItemMutation.mutate,
   }
 }

@@ -1,0 +1,399 @@
+diff --git a/backend/src/main/java/com/ecommerce/panier/controller/CartController.java b/backend/src/main/java/com/ecommerce/panier/controller/CartController.java
+index b2e7f5c..d76377e 100644
+--- a/backend/src/main/java/com/ecommerce/panier/controller/CartController.java
++++ b/backend/src/main/java/com/ecommerce/panier/controller/CartController.java
+@@ -3,6 +3,7 @@ package com.ecommerce.panier.controller;
+ import com.ecommerce.auth.UserPrincipal;
+ import com.ecommerce.panier.dto.AddCartItemRequest;
+ import com.ecommerce.panier.dto.CartDTO;
++import com.ecommerce.panier.dto.UpdateCartItemRequest;
+ import com.ecommerce.panier.service.CartService;
+ import jakarta.validation.Valid;
+ import lombok.RequiredArgsConstructor;
+@@ -39,6 +40,14 @@ public class CartController {
+         return ResponseEntity.ok(cartService.addItem(userIdOf(principal), guestId, request));
+     }
+ 
++    @PatchMapping("/items/{itemId}")
++    public ResponseEntity<CartDTO> updateItem(@AuthenticationPrincipal UserPrincipal principal,
++                                               @RequestHeader(value = GUEST_HEADER, required = false) String guestId,
++                                               @PathVariable Long itemId,
++                                               @Valid @RequestBody UpdateCartItemRequest request) {
++        return ResponseEntity.ok(cartService.updateItemQuantity(userIdOf(principal), guestId, itemId, request.getQuantity()));
++    }
++
+     @DeleteMapping("/items/{itemId}")
+     public ResponseEntity<CartDTO> removeItem(@AuthenticationPrincipal UserPrincipal principal,
+                                                @RequestHeader(value = GUEST_HEADER, required = false) String guestId,
+diff --git a/backend/src/main/java/com/ecommerce/panier/dto/CartItemDTO.java b/backend/src/main/java/com/ecommerce/panier/dto/CartItemDTO.java
+index 9554476..5969442 100644
+--- a/backend/src/main/java/com/ecommerce/panier/dto/CartItemDTO.java
++++ b/backend/src/main/java/com/ecommerce/panier/dto/CartItemDTO.java
+@@ -19,4 +19,10 @@ public class CartItemDTO {
+     private int quantity;
+     private BigDecimal unitPrice;
+     private BigDecimal subtotal;
++
++    /** Photo de la couleur choisie, avec repli sur la photo par défaut du produit. */
++    private String imageUrl;
++
++    /** Stock disponible pour ce (produit, grade, couleur) — plafond du sélecteur de quantité côté front. */
++    private long availableStock;
+ }
+diff --git a/backend/src/main/java/com/ecommerce/panier/dto/UpdateCartItemRequest.java b/backend/src/main/java/com/ecommerce/panier/dto/UpdateCartItemRequest.java
+new file mode 100644
+index 0000000..ecc7ed4
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/panier/dto/UpdateCartItemRequest.java
+@@ -0,0 +1,13 @@
++package com.ecommerce.panier.dto;
++
++import jakarta.validation.constraints.Min;
++import lombok.Getter;
++import lombok.Setter;
++
++@Getter
++@Setter
++public class UpdateCartItemRequest {
++
++    @Min(1)
++    private int quantity;
++}
+diff --git a/backend/src/main/java/com/ecommerce/panier/service/CartService.java b/backend/src/main/java/com/ecommerce/panier/service/CartService.java
+index 817835f..8e888a7 100644
+--- a/backend/src/main/java/com/ecommerce/panier/service/CartService.java
++++ b/backend/src/main/java/com/ecommerce/panier/service/CartService.java
+@@ -102,6 +102,33 @@ public class CartService {
+         return toDTO(cart);
+     }
+ 
++    /**
++     * Change la quantité d'un article déjà présent dans le panier (au lieu
++     * de devoir le retirer puis le rajouter). Revalide le stock disponible,
++     * comme addItem.
++     */
++    @Transactional
++    public CartDTO updateItemQuantity(Long userId, String guestId, Long itemId, int quantity) {
++        Cart cart = resolveCart(userId, guestId);
++        CartItem item = cart.getItems().stream()
++                .filter(i -> i.getId().equals(itemId))
++                .findFirst()
++                .orElseThrow(() -> new ResourceNotFoundException("Article introuvable dans le panier : " + itemId));
++
++        long available = productUnitRepository.countByProductIdAndGradeAndColorAndStatus(
++                item.getProductId(), item.getGrade(), item.getColor(), UnitStatus.AVAILABLE);
++
++        if (available < quantity) {
++            throw new BadRequestException(
++                    "Stock insuffisant pour cette variante (disponible : " + available + ")");
++        }
++
++        item.setQuantity(quantity);
++        cart.setUpdatedAt(Instant.now());
++        cartRepository.save(cart);
++        return toDTO(cart);
++    }
++
+     /**
+      * Fusionne le panier invité (s'il existe) dans le panier de l'utilisateur
+      * qui vient de se connecter/s'inscrire. Les lignes identiques (même
+@@ -193,6 +220,13 @@ public class CartService {
+                 .findFirst()
+                 .orElse(BigDecimal.ZERO);
+ 
++        long availableStock = productUnitRepository.countByProductIdAndGradeAndColorAndStatus(
++                item.getProductId(), item.getGrade(), item.getColor(), UnitStatus.AVAILABLE);
++
++        String imageUrl = product != null
++                ? product.getColorImages().getOrDefault(item.getColor(), product.getImageUrl())
++                : null;
++
+         return CartItemDTO.builder()
+                 .id(item.getId())
+                 .productId(item.getProductId())
+@@ -202,6 +236,8 @@ public class CartService {
+                 .quantity(item.getQuantity())
+                 .unitPrice(unitPrice)
+                 .subtotal(unitPrice.multiply(BigDecimal.valueOf(item.getQuantity())))
++                .imageUrl(imageUrl)
++                .availableStock(availableStock)
+                 .build();
+     }
+ }
+diff --git a/frontend/src/api/cartApi.js b/frontend/src/api/cartApi.js
+index 22e2596..99b78bf 100644
+--- a/frontend/src/api/cartApi.js
++++ b/frontend/src/api/cartApi.js
+@@ -3,5 +3,7 @@ import axiosInstance from './axiosInstance'
+ export const cartApi = {
+   get: () => axiosInstance.get('/cart').then((r) => r.data),
+   addItem: (data) => axiosInstance.post('/cart/items', data).then((r) => r.data),
++  updateItem: ({ itemId, quantity }) =>
++    axiosInstance.patch(`/cart/items/${itemId}`, { quantity }).then((r) => r.data),
+   removeItem: (itemId) => axiosInstance.delete(`/cart/items/${itemId}`).then((r) => r.data),
+ }
+diff --git a/frontend/src/components/cart/CartItemRow.jsx b/frontend/src/components/cart/CartItemRow.jsx
+index ab9145e..e809ef8 100644
+--- a/frontend/src/components/cart/CartItemRow.jsx
++++ b/frontend/src/components/cart/CartItemRow.jsx
+@@ -1,23 +1,65 @@
++import { Link } from 'react-router-dom'
++import { Minus, Plus, X } from 'lucide-react'
+ import PriceTag from '../common/PriceTag'
+ 
+-export default function CartItemRow({ item, onRemove }) {
++export default function CartItemRow({ item, onRemove, onUpdateQuantity }) {
++  const atMax = item.quantity >= item.availableStock
++
+   return (
+-    <div className="flex items-center justify-between border-b border-surface-sunken py-4">
+-      <div className="flex flex-col gap-1">
+-        <span className="text-sm font-medium text-ink">{item.productName}</span>
+-        <span className="font-mono text-xs text-ink-soft">
+-          Grade {item.grade} · {item.color} · quantité {item.quantity}
+-        </span>
+-      </div>
+-      <div className="flex items-center gap-4">
+-        <PriceTag price={item.subtotal} size="sm" />
+-        <button
+-          onClick={() => onRemove(item.id)}
+-          className="text-xs text-ink-soft hover:text-deal-up"
+-          aria-label="Retirer du panier"
+-        >
+-          Retirer
+-        </button>
++    <div className="flex gap-4 border-b border-line py-6 first:pt-0">
++      <Link to={`/products/${item.productId}`} className="h-24 w-24 shrink-0 overflow-hidden border border-line bg-surface-muted">
++        {item.imageUrl ? (
++          <img src={item.imageUrl} alt={item.productName} className="h-full w-full object-cover" />
++        ) : (
++          <div className="flex h-full w-full items-center justify-center text-ink-soft">
++            <span className="text-[10px]">Pas d’image</span>
++          </div>
++        )}
++      </Link>
++
++      <div className="flex flex-1 flex-col justify-between">
++        <div className="flex items-start justify-between gap-4">
++          <div>
++            <Link to={`/products/${item.productId}`} className="font-display text-base text-ink hover:text-brand-600">
++              {item.productName}
++            </Link>
++            <p className="mt-1 font-mono text-xs uppercase tracking-wide text-ink-soft">
++              {item.grade} · {item.color}
++            </p>
++          </div>
++          <button
++            onClick={() => onRemove(item.id)}
++            aria-label="Retirer du panier"
++            className="text-ink-soft transition hover:text-deal-up"
++          >
++            <X size={16} />
++          </button>
++        </div>
++
++        <div className="flex items-end justify-between">
++          <div className="flex items-center border border-line">
++            <button
++              onClick={() => onUpdateQuantity(item.id, item.quantity - 1)}
++              disabled={item.quantity <= 1}
++              aria-label="Diminuer la quantité"
++              className="p-2 text-ink-soft transition hover:text-ink disabled:opacity-30"
++            >
++              <Minus size={13} />
++            </button>
++            <span className="w-7 text-center font-mono text-xs text-ink">{item.quantity}</span>
++            <button
++              onClick={() => onUpdateQuantity(item.id, item.quantity + 1)}
++              disabled={atMax}
++              aria-label="Augmenter la quantité"
++              title={atMax ? 'Stock maximum atteint' : undefined}
++              className="p-2 text-ink-soft transition hover:text-ink disabled:opacity-30"
++            >
++              <Plus size={13} />
++            </button>
++          </div>
++
++          <PriceTag price={item.subtotal} size="sm" />
++        </div>
+       </div>
+     </div>
+   )
+diff --git a/frontend/src/components/cart/CartSummary.jsx b/frontend/src/components/cart/CartSummary.jsx
+index 8119d70..9a70ba9 100644
+--- a/frontend/src/components/cart/CartSummary.jsx
++++ b/frontend/src/components/cart/CartSummary.jsx
+@@ -1,9 +1,16 @@
+ import { useNavigate } from 'react-router-dom'
+ import toast from 'react-hot-toast'
++import { ShieldCheck, RotateCcw, Truck } from 'lucide-react'
+ import PriceTag from '../common/PriceTag'
+ import { useCheckout } from '../../hooks/useOrders'
+ import { useAuth } from '../../hooks/useAuth'
+ 
++const TRUST_ROW = [
++  { icon: ShieldCheck, label: 'Garantie 12 mois' },
++  { icon: RotateCcw, label: 'Retour sous 30 jours' },
++  { icon: Truck, label: 'Livraison suivie' },
++]
++
+ export default function CartSummary({ total, disabled }) {
+   const navigate = useNavigate()
+   const { isAuthenticated } = useAuth()
+@@ -30,15 +37,20 @@ export default function CartSummary({ total, disabled }) {
+   }
+ 
+   return (
+-    <div className="flex flex-col gap-4 rounded-xl border border-surface-sunken bg-surface p-5">
+-      <div className="flex items-center justify-between">
+-        <span className="text-sm font-medium text-ink-soft">Total</span>
+-        <PriceTag price={total} size="lg" />
++    <div className="flex flex-col gap-6 border border-line p-6">
++      <div>
++        <p className="eyebrow mb-4">Récapitulatif</p>
++        <div className="flex items-center justify-between border-t border-line pt-4">
++          <span className="text-sm text-ink-soft">Total</span>
++          <PriceTag price={total} size="lg" />
++        </div>
++        <p className="mt-1.5 text-xs text-ink-soft">Frais de livraison calculés à l’étape suivante.</p>
+       </div>
++
+       <button
+         onClick={handleCheckout}
+         disabled={disabled || checkout.isPending}
+-        className="rounded-lg bg-ink py-3 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-40"
++        className="rounded-full bg-ink py-3.5 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-40"
+       >
+         {checkout.isPending
+           ? 'Validation…'
+@@ -46,6 +58,15 @@ export default function CartSummary({ total, disabled }) {
+             ? 'Valider la commande'
+             : 'Se connecter pour valider'}
+       </button>
++
++      <div className="flex flex-col gap-3 border-t border-line pt-5">
++        {TRUST_ROW.map(({ icon: Icon, label }) => (
++          <div key={label} className="flex items-center gap-2.5 text-xs text-ink-soft">
++            <Icon size={15} strokeWidth={1.6} />
++            {label}
++          </div>
++        ))}
++      </div>
+     </div>
+   )
+ }
+diff --git a/frontend/src/hooks/useCart.js b/frontend/src/hooks/useCart.js
+index a6478a5..8579789 100644
+--- a/frontend/src/hooks/useCart.js
++++ b/frontend/src/hooks/useCart.js
+@@ -31,6 +31,19 @@ export function useCart() {
+     },
+   })
+ 
++  const updateItemMutation = useMutation({
++    mutationFn: cartApi.updateItem,
++    onSuccess: () => {
++      queryClient.invalidateQueries({ queryKey: ['cart'] })
++    },
++    onError: (err) => {
++      toast.error(err.response?.data?.message || 'Impossible de modifier la quantité')
++      // Le stock a pu bouger entre-temps (pricing dynamique) : on resynchronise
++      // avec le serveur plutôt que de laisser affiché un état optimiste faux.
++      queryClient.invalidateQueries({ queryKey: ['cart'] })
++    },
++  })
++
+   return {
+     cart: cartQuery.data,
+     isLoading: cartQuery.isLoading,
+@@ -38,5 +51,6 @@ export function useCart() {
+     addItem: addItemMutation.mutate,
+     isAdding: addItemMutation.isPending,
+     removeItem: removeItemMutation.mutate,
++    updateItem: updateItemMutation.mutate,
+   }
+ }
+diff --git a/frontend/src/pages/CartPage.jsx b/frontend/src/pages/CartPage.jsx
+index bb9c6b6..25a101d 100644
+--- a/frontend/src/pages/CartPage.jsx
++++ b/frontend/src/pages/CartPage.jsx
+@@ -1,4 +1,5 @@
+ import { Link } from 'react-router-dom'
++import { ShoppingBag } from 'lucide-react'
+ import { useCart } from '../hooks/useCart'
+ import CartItemRow from '../components/cart/CartItemRow'
+ import CartSummary from '../components/cart/CartSummary'
+@@ -6,30 +7,61 @@ import LoadingSpinner from '../components/common/LoadingSpinner'
+ import ErrorBanner from '../components/common/ErrorBanner'
+ 
+ export default function CartPage() {
+-  const { cart, isLoading, isError, removeItem } = useCart()
++  const { cart, isLoading, isError, removeItem, updateItem } = useCart()
+ 
+-  if (isLoading) return <LoadingSpinner label="Chargement du panier…" />
+-  if (isError) return <div className="mx-auto max-w-3xl px-4 py-10"><ErrorBanner message="Impossible de charger le panier." /></div>
++  if (isLoading) {
++    return (
++      <div className="mx-auto max-w-6xl px-6 py-24">
++        <LoadingSpinner label="Chargement du panier…" />
++      </div>
++    )
++  }
++
++  if (isError) {
++    return (
++      <div className="mx-auto max-w-3xl px-6 py-24">
++        <ErrorBanner message="Impossible de charger le panier." />
++      </div>
++    )
++  }
+ 
+   const isEmpty = !cart?.items?.length
+ 
++  const handleUpdateQuantity = (itemId, quantity) => {
++    if (quantity < 1) return
++    updateItem({ itemId, quantity })
++  }
++
+   return (
+-    <div className="mx-auto max-w-3xl px-4 py-10">
+-      <h1 className="mb-6 text-2xl">Mon panier</h1>
++    <div className="mx-auto max-w-6xl px-6 py-14">
++      <p className="eyebrow mb-3">Panier</p>
++      <h1 className="font-display text-4xl font-medium text-ink">Mon panier</h1>
+ 
+       {isEmpty ? (
+-        <div className="rounded-xl border border-dashed border-surface-sunken py-16 text-center">
+-          <p className="text-sm text-ink-soft">Ton panier est vide.</p>
+-          <Link to="/" className="mt-3 inline-block text-sm text-brand-600 hover:underline">
+-            Parcourir le catalogue →
++        <div className="mt-14 flex flex-col items-center border border-line py-20 text-center">
++          <ShoppingBag size={28} strokeWidth={1.4} className="text-ink-soft" />
++          <p className="mt-4 text-sm text-ink-soft">Ton panier est vide.</p>
++          <Link
++            to="/boutique"
++            className="mt-6 rounded-full bg-ink px-6 py-3 text-sm font-medium text-white transition hover:bg-brand-600"
++          >
++            Parcourir la boutique
+           </Link>
+         </div>
+       ) : (
+-        <div className="grid gap-8 md:grid-cols-3">
+-          <div className="md:col-span-2">
++        <div className="mt-10 grid gap-12 lg:grid-cols-3">
++          <div className="lg:col-span-2">
+             {cart.items.map((item) => (
+-              <CartItemRow key={item.id} item={item} onRemove={removeItem} />
++              <CartItemRow
++                key={item.id}
++                item={item}
++                onRemove={removeItem}
++                onUpdateQuantity={handleUpdateQuantity}
++              />
+             ))}
++            <Link to="/boutique" className="mt-6 inline-block text-sm text-ink-soft transition hover:text-ink">
++              ← Continuer mes achats
++            </Link>
+           </div>
+           <div>
+             <CartSummary total={cart.total} disabled={isEmpty} />

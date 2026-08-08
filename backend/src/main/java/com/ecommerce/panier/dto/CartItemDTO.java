@@ -19,4 +19,10 @@ public class CartItemDTO {
     private int quantity;
     private BigDecimal unitPrice;
     private BigDecimal subtotal;
+
+    /** Photo de la couleur choisie, avec repli sur la photo par défaut du produit. */
+    private String imageUrl;
+
+    /** Stock disponible pour ce (produit, grade, couleur) — plafond du sélecteur de quantité côté front. */
+    private long availableStock;
 }

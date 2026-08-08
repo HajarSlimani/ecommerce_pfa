@@ -1,0 +1,193 @@
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java b/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java
+index aa87e78..5a1732f 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java
+@@ -70,4 +70,19 @@ public class ProductController {
+         productService.addUnit(id, request);
+         return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).build();
+     }
++
++    /**
++     * Associe une photo à une couleur donnée pour ce produit (voir la note
++     * sur Product.colorImages) — utilisé par la fiche produit pour changer
++     * de photo quand on change de couleur, au lieu d'afficher toujours la
++     * même image quelle que soit la couleur choisie.
++     */
++    @PutMapping("/{id}/color-images")
++    @PreAuthorize("hasRole('ADMIN')")
++    public ResponseEntity<Void> setColorImage(
++            @PathVariable Long id,
++            @Valid @RequestBody com.ecommerce.catalogue.dto.SetColorImageRequest request) {
++        productService.setColorImage(id, request.getColor(), request.getImageUrl());
++        return ResponseEntity.noContent().build();
++    }
+ }
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDTO.java b/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDTO.java
+index ddd1bb0..c9ae11a 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDTO.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/dto/ProductDTO.java
+@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
+ import lombok.Setter;
+ 
+ import java.math.BigDecimal;
++import java.util.Map;
+ 
+ /**
+  * @NoArgsConstructor + @Setter sont nécessaires même si le code applicatif
+@@ -37,4 +38,11 @@ public class ProductDTO {
+      * de jointure vers les unités) pour ne pas changer son comportement.
+      */
+     private BigDecimal minPrice;
++
++    /**
++     * Photo par couleur (couleur → URL). Absente/vide si le produit n'a que
++     * sa photo par défaut (imageUrl). Renseignée sur le endpoint de détail
++     * uniquement (pas sur le listing/search, qui n'a pas besoin de ça).
++     */
++    private Map<String, String> colorImages;
+ }
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/dto/SetColorImageRequest.java b/backend/src/main/java/com/ecommerce/catalogue/dto/SetColorImageRequest.java
+new file mode 100644
+index 0000000..22fd45a
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/catalogue/dto/SetColorImageRequest.java
+@@ -0,0 +1,16 @@
++package com.ecommerce.catalogue.dto;
++
++import jakarta.validation.constraints.NotBlank;
++import lombok.Getter;
++import lombok.Setter;
++
++@Getter
++@Setter
++public class SetColorImageRequest {
++
++    @NotBlank
++    private String color;
++
++    @NotBlank
++    private String imageUrl;
++}
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/entity/Product.java b/backend/src/main/java/com/ecommerce/catalogue/entity/Product.java
+index 16fdca7..8d3b4fd 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/entity/Product.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/entity/Product.java
+@@ -5,7 +5,9 @@ import lombok.*;
+ 
+ import java.time.Instant;
+ import java.util.ArrayList;
++import java.util.HashMap;
+ import java.util.List;
++import java.util.Map;
+ 
+ @Entity
+ @Table(name = "products")
+@@ -34,6 +36,21 @@ public class Product {
+     @Column(name = "image_url")
+     private String imageUrl;
+ 
++    /**
++     * Photo par couleur, en complément de imageUrl (photo par défaut/produit).
++     * Le grade n'affecte pas la photo (un iPhone Grade A et Grade B de la
++     * même couleur se ressemblent visuellement) — seule la couleur compte,
++     * d'où une correspondance couleur → URL plutôt qu'un champ par unité
++     * (qui obligerait à ressaisir la même image pour chaque unité en stock).
++     * Couleur absente de la map → on retombe sur imageUrl côté front.
++     */
++    @ElementCollection
++    @CollectionTable(name = "product_color_images", joinColumns = @JoinColumn(name = "product_id"))
++    @MapKeyColumn(name = "color")
++    @Column(name = "image_url")
++    @Builder.Default
++    private Map<String, String> colorImages = new HashMap<>();
++
+     @Builder.Default
+     private Instant createdAt = Instant.now();
+ 
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java b/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
+index 96fac9d..b085313 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
+@@ -140,6 +140,20 @@ public class ProductService {
+         productUnitRepository.save(unit);
+     }
+ 
++    /**
++     * Définit/écrase la photo associée à une couleur pour ce produit.
++     * Évince le cache productVariants (la fiche détail sert ces images) —
++     * pas besoin de toucher au cache "products" (listing), qui ne renvoie
++     * pas colorImages.
++     */
++    @CacheEvict(value = "productVariants", key = "#productId")
++    public void setColorImage(Long productId, String color, String imageUrl) {
++        Product product = productRepository.findById(productId)
++                .orElseThrow(() -> new ResourceNotFoundException("Produit introuvable : " + productId));
++        product.getColorImages().put(color, imageUrl);
++        productRepository.save(product);
++    }
++
+     private ProductDTO toDTO(Product product) {
+         return ProductDTO.builder()
+                 .id(product.getId())
+@@ -148,6 +162,7 @@ public class ProductService {
+                 .brand(product.getBrand())
+                 .category(product.getCategory())
+                 .imageUrl(product.getImageUrl())
++                .colorImages(product.getColorImages())
+                 .build();
+     }
+ }
+diff --git a/frontend/src/index.css b/frontend/src/index.css
+index 535bd5e..b370732 100644
+--- a/frontend/src/index.css
++++ b/frontend/src/index.css
+@@ -21,9 +21,18 @@
+   .animate-kenburns {
+     animation: kenburns 6s ease-out forwards;
+   }
++
++  .animate-fadein {
++    animation: fadein 300ms ease-out;
++  }
+ }
+ 
+ @keyframes kenburns {
+   from { transform: scale(1); }
+   to { transform: scale(1.08); }
+ }
++
++@keyframes fadein {
++  from { opacity: 0; }
++  to { opacity: 1; }
++}
+diff --git a/frontend/src/pages/ProductDetailPage.jsx b/frontend/src/pages/ProductDetailPage.jsx
+index d48c258..4d73d43 100644
+--- a/frontend/src/pages/ProductDetailPage.jsx
++++ b/frontend/src/pages/ProductDetailPage.jsx
+@@ -58,6 +58,10 @@ export default function ProductDetailPage() {
+   const selectedVariant = variants.find((v) => v.grade === selectedGrade && v.color === selectedColor)
+   const categoryLabel = CATEGORIES.find((c) => c.id === product.category)?.label
+ 
++  // Photo spécifique à la couleur choisie si elle existe, sinon photo par
++  // défaut du produit (voir la note sur Product.colorImages côté backend).
++  const displayImage = (selectedColor && product.colorImages?.[selectedColor]) || product.imageUrl
++
+   const handleAddToCart = () => {
+     if (!selectedVariant) return
+     addItem({ productId: product.id, grade: selectedGrade, color: selectedColor, quantity })
+@@ -84,8 +88,13 @@ export default function ProductDetailPage() {
+ 
+       <div className="grid gap-14 lg:grid-cols-2">
+         <div className="aspect-square overflow-hidden border border-line bg-surface-muted">
+-          {product.imageUrl ? (
+-            <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
++          {displayImage ? (
++            <img
++              key={displayImage}
++              src={displayImage}
++              alt={`${product.name}${selectedColor ? ` — ${selectedColor}` : ''}`}
++              className="h-full w-full animate-fadein object-cover"
++            />
+           ) : (
+             <div className="flex h-full w-full items-center justify-center text-ink-soft">
+               <span className="text-xs">Pas d’image</span>

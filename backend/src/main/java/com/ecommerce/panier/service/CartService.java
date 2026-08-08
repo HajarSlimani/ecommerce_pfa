@@ -103,6 +103,33 @@ public class CartService {
     }
 
     /**
+     * Change la quantité d'un article déjà présent dans le panier (au lieu
+     * de devoir le retirer puis le rajouter). Revalide le stock disponible,
+     * comme addItem.
+     */
+    @Transactional
+    public CartDTO updateItemQuantity(Long userId, String guestId, Long itemId, int quantity) {
+        Cart cart = resolveCart(userId, guestId);
+        CartItem item = cart.getItems().stream()
+                .filter(i -> i.getId().equals(itemId))
+                .findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Article introuvable dans le panier : " + itemId));
+
+        long available = productUnitRepository.countByProductIdAndGradeAndColorAndStatus(
+                item.getProductId(), item.getGrade(), item.getColor(), UnitStatus.AVAILABLE);
+
+        if (available < quantity) {
+            throw new BadRequestException(
+                    "Stock insuffisant pour cette variante (disponible : " + available + ")");
+        }
+
+        item.setQuantity(quantity);
+        cart.setUpdatedAt(Instant.now());
+        cartRepository.save(cart);
+        return toDTO(cart);
+    }
+
+    /**
      * Fusionne le panier invité (s'il existe) dans le panier de l'utilisateur
      * qui vient de se connecter/s'inscrire. Les lignes identiques (même
      * produit+grade+couleur) voient leurs quantités additionnées. Le panier
@@ -193,6 +220,13 @@ public class CartService {
                 .findFirst()
                 .orElse(BigDecimal.ZERO);
 
+        long availableStock = productUnitRepository.countByProductIdAndGradeAndColorAndStatus(
+                item.getProductId(), item.getGrade(), item.getColor(), UnitStatus.AVAILABLE);
+
+        String imageUrl = product != null
+                ? product.getColorImages().getOrDefault(item.getColor(), product.getImageUrl())
+                : null;
+
         return CartItemDTO.builder()
                 .id(item.getId())
                 .productId(item.getProductId())
@@ -202,6 +236,8 @@ public class CartService {
                 .quantity(item.getQuantity())
                 .unitPrice(unitPrice)
                 .subtotal(unitPrice.multiply(BigDecimal.valueOf(item.getQuantity())))
+                .imageUrl(imageUrl)
+                .availableStock(availableStock)
                 .build();
     }
 }

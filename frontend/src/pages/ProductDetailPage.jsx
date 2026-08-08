@@ -58,6 +58,10 @@ export default function ProductDetailPage() {
   const selectedVariant = variants.find((v) => v.grade === selectedGrade && v.color === selectedColor)
   const categoryLabel = CATEGORIES.find((c) => c.id === product.category)?.label
 
+  // Photo spécifique à la couleur choisie si elle existe, sinon photo par
+  // défaut du produit (voir la note sur Product.colorImages côté backend).
+  const displayImage = (selectedColor && product.colorImages?.[selectedColor]) || product.imageUrl
+
   const handleAddToCart = () => {
     if (!selectedVariant) return
     addItem({ productId: product.id, grade: selectedGrade, color: selectedColor, quantity })
@@ -84,8 +88,13 @@ export default function ProductDetailPage() {
 
       <div className="grid gap-14 lg:grid-cols-2">
         <div className="aspect-square overflow-hidden border border-line bg-surface-muted">
-          {product.imageUrl ? (
-            <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
+          {displayImage ? (
+            <img
+              key={displayImage}
+              src={displayImage}
+              alt={`${product.name}${selectedColor ? ` — ${selectedColor}` : ''}`}
+              className="h-full w-full animate-fadein object-cover"
+            />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-ink-soft">
               <span className="text-xs">Pas d’image</span>

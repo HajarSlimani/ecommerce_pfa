@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 /**
  * @NoArgsConstructor + @Setter sont nécessaires même si le code applicatif
@@ -37,4 +38,11 @@ public class ProductDTO {
      * de jointure vers les unités) pour ne pas changer son comportement.
      */
     private BigDecimal minPrice;
+
+    /**
+     * Photo par couleur (couleur → URL). Absente/vide si le produit n'a que
+     * sa photo par défaut (imageUrl). Renseignée sur le endpoint de détail
+     * uniquement (pas sur le listing/search, qui n'a pas besoin de ça).
+     */
+    private Map<String, String> colorImages;
 }

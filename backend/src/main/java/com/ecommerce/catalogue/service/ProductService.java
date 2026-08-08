@@ -140,6 +140,20 @@ public class ProductService {
         productUnitRepository.save(unit);
     }
 
+    /**
+     * Définit/écrase la photo associée à une couleur pour ce produit.
+     * Évince le cache productVariants (la fiche détail sert ces images) —
+     * pas besoin de toucher au cache "products" (listing), qui ne renvoie
+     * pas colorImages.
+     */
+    @CacheEvict(value = "productVariants", key = "#productId")
+    public void setColorImage(Long productId, String color, String imageUrl) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Produit introuvable : " + productId));
+        product.getColorImages().put(color, imageUrl);
+        productRepository.save(product);
+    }
+
     private ProductDTO toDTO(Product product) {
         return ProductDTO.builder()
                 .id(product.getId())
@@ -148,6 +162,7 @@ public class ProductService {
                 .brand(product.getBrand())
                 .category(product.getCategory())
                 .imageUrl(product.getImageUrl())
+                .colorImages(product.getColorImages())
                 .build();
     }
 }

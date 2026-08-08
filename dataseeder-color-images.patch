@@ -1,0 +1,68 @@
+diff --git a/backend/src/main/java/com/ecommerce/seed/DataSeeder.java b/backend/src/main/java/com/ecommerce/seed/DataSeeder.java
+index a1e7e95..7ce0097 100644
+--- a/backend/src/main/java/com/ecommerce/seed/DataSeeder.java
++++ b/backend/src/main/java/com/ecommerce/seed/DataSeeder.java
+@@ -28,10 +28,14 @@ import org.springframework.transaction.annotation.Transactional;
+ 
+ import java.math.BigDecimal;
+ import java.math.RoundingMode;
++import java.net.URLEncoder;
++import java.nio.charset.StandardCharsets;
+ import java.time.Instant;
+ import java.time.temporal.ChronoUnit;
+ import java.util.ArrayList;
++import java.util.LinkedHashMap;
+ import java.util.List;
++import java.util.Map;
+ import java.util.Random;
+ 
+ /**
+@@ -179,6 +183,8 @@ public class DataSeeder implements CommandLineRunner {
+                     .brand(def.brand())
+                     .category(def.category())
+                     .description(def.description())
++                    .imageUrl(placeholderImage(def.name(), "F0EFEA", "111111"))
++                    .colorImages(buildColorImages(def.name()))
+                     .build());
+ 
+             int serialCounter = 1;
+@@ -339,6 +345,39 @@ public class DataSeeder implements CommandLineRunner {
+         log.info("Commande de démo créée pour client@test.com (produit : {})", firstProduct.getName());
+     }
+ 
++    /**
++     * Couleurs de démo (bg/texte) pour générer des visuels distincts par
++     * couleur via placehold.co — pas de vraies photos produit ici pour
++     * éviter tout souci de droits sur des images de marques (Apple,
++     * Samsung...) dans des données de seed ; en prod/démo réelle, on
++     * remplace ça par de vraies photos via PUT /products/{id}/color-images.
++     */
++    private static final Map<String, String[]> COLOR_PALETTE = new LinkedHashMap<>();
++    static {
++        COLOR_PALETTE.put("Noir", new String[]{"1A1A1A", "FFFFFF"});
++        COLOR_PALETTE.put("Blanc", new String[]{"F5F4F0", "111111"});
++        COLOR_PALETTE.put("Bleu", new String[]{"1D4ED8", "FFFFFF"});
++        COLOR_PALETTE.put("Gris sidéral", new String[]{"71717A", "FFFFFF"});
++    }
++
++    private String placeholderImage(String label, String bgHex, String fgHex) {
++        String encodedLabel = URLEncoder.encode(label, StandardCharsets.UTF_8);
++        return "https://placehold.co/800x800/" + bgHex + "/" + fgHex + "?text=" + encodedLabel;
++    }
++
++    /**
++     * Une image par couleur pour un produit donné, afin que la fiche produit
++     * affiche bien une photo différente selon la couleur choisie (voir
++     * Product.colorImages) — chaque couleur a son propre fond, ce qui rend
++     * le changement de photo visible et démontrable.
++     */
++    private Map<String, String> buildColorImages(String productName) {
++        Map<String, String> images = new LinkedHashMap<>();
++        COLOR_PALETTE.forEach((color, hexes) ->
++                images.put(color, placeholderImage(productName + " — " + color, hexes[0], hexes[1])));
++        return images;
++    }
++
+     private BigDecimal applyRandomVariation(BigDecimal base, double minPct, double maxPct) {
+         double pct = minPct + (maxPct - minPct) * random.nextDouble();
+         BigDecimal factor = BigDecimal.valueOf(1 + pct);

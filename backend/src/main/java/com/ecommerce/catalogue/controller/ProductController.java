@@ -70,4 +70,19 @@ public class ProductController {
         productService.addUnit(id, request);
         return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).build();
     }
+
+    /**
+     * Associe une photo à une couleur donnée pour ce produit (voir la note
+     * sur Product.colorImages) — utilisé par la fiche produit pour changer
+     * de photo quand on change de couleur, au lieu d'afficher toujours la
+     * même image quelle que soit la couleur choisie.
+     */
+    @PutMapping("/{id}/color-images")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Void> setColorImage(
+            @PathVariable Long id,
+            @Valid @RequestBody com.ecommerce.catalogue.dto.SetColorImageRequest request) {
+        productService.setColorImage(id, request.getColor(), request.getImageUrl());
+        return ResponseEntity.noContent().build();
+    }
 }

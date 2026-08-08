@@ -3,6 +3,7 @@ package com.ecommerce.panier.controller;
 import com.ecommerce.auth.UserPrincipal;
 import com.ecommerce.panier.dto.AddCartItemRequest;
 import com.ecommerce.panier.dto.CartDTO;
+import com.ecommerce.panier.dto.UpdateCartItemRequest;
 import com.ecommerce.panier.service.CartService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +38,14 @@ public class CartController {
                                             @RequestHeader(value = GUEST_HEADER, required = false) String guestId,
                                             @Valid @RequestBody AddCartItemRequest request) {
         return ResponseEntity.ok(cartService.addItem(userIdOf(principal), guestId, request));
+    }
+
+    @PatchMapping("/items/{itemId}")
+    public ResponseEntity<CartDTO> updateItem(@AuthenticationPrincipal UserPrincipal principal,
+                                               @RequestHeader(value = GUEST_HEADER, required = false) String guestId,
+                                               @PathVariable Long itemId,
+                                               @Valid @RequestBody UpdateCartItemRequest request) {
+        return ResponseEntity.ok(cartService.updateItemQuantity(userIdOf(principal), guestId, itemId, request.getQuantity()));
     }
 
     @DeleteMapping("/items/{itemId}")
