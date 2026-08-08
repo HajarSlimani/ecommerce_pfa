@@ -1,0 +1,27 @@
+diff --git a/frontend/src/components/common/Navbar.jsx b/frontend/src/components/common/Navbar.jsx
+index 8193ba8..15df53f 100644
+--- a/frontend/src/components/common/Navbar.jsx
++++ b/frontend/src/components/common/Navbar.jsx
+@@ -129,9 +129,19 @@ export default function Navbar() {
+               </div>
+             </div>
+           ) : (
+-            <Link to="/login" aria-label="Connexion">
+-              <User size={19} strokeWidth={1.6} />
+-            </Link>
++            <div className="group relative">
++              <Link to="/login" aria-label="Compte">
++                <User size={19} strokeWidth={1.6} />
++              </Link>
++              <div className="invisible absolute right-0 top-full mt-3 w-44 border border-line bg-white py-2 opacity-0 shadow-sm transition group-hover:visible group-hover:opacity-100">
++                <Link to="/login" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
++                  Se connecter
++                </Link>
++                <Link to="/register" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
++                  Créer un compte
++                </Link>
++              </div>
++            </div>
+           )}
+ 
+           <Link to="/cart" className="relative" aria-label="Panier">

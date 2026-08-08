@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Search, User, ShoppingBag, X } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
@@ -16,6 +16,8 @@ export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchValue, setSearchValue] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef(null)
 
   // Sur la page d'accueil, le hero plein écran est sombre : la navbar démarre
   // transparente avec du texte clair, puis bascule en verre dépoli au scroll.
@@ -32,7 +34,22 @@ export default function Navbar() {
 
   useEffect(() => {
     setSearchOpen(false)
+    setMenuOpen(false)
   }, [location.pathname])
+
+  // Menu du compte ouvert/fermé au clic plutôt qu'au survol : un menu en
+  // hover avec un espace entre le déclencheur et le menu se ferme dès que
+  // le curseur traverse cet espace, rendant les liens inatteignables.
+  useEffect(() => {
+    if (!menuOpen) return
+    const onClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [menuOpen])
 
   const handleLogout = () => {
     logout()
@@ -107,31 +124,45 @@ export default function Navbar() {
           </div>
 
           {isAuthenticated ? (
-            <div className="group relative">
-              <Link to="/orders" aria-label="Mon compte">
+            <div ref={menuRef} className="relative">
+              <button onClick={() => setMenuOpen((o) => !o)} aria-label="Mon compte" aria-expanded={menuOpen}>
                 <User size={19} strokeWidth={1.6} />
-              </Link>
-              <div className="invisible absolute right-0 top-full mt-3 w-44 border border-line bg-white py-2 opacity-0 shadow-sm transition group-hover:visible group-hover:opacity-100">
-                <Link to="/orders" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
-                  Mes commandes
-                </Link>
-                {isAdmin && (
-                  <Link to="/admin" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
-                    Administration
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full mt-3 w-44 border border-line bg-white py-2 shadow-sm">
+                  <Link to="/orders" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
+                    Mes commandes
                   </Link>
-                )}
-                <button
-                  onClick={handleLogout}
-                  className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-surface-muted"
-                >
-                  Déconnexion
-                </button>
-              </div>
+                  {isAdmin && (
+                    <Link to="/admin" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
+                      Administration
+                    </Link>
+                  )}
+                  <button
+                    onClick={handleLogout}
+                    className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-surface-muted"
+                  >
+                    Déconnexion
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
-            <Link to="/login" aria-label="Connexion">
-              <User size={19} strokeWidth={1.6} />
-            </Link>
+            <div ref={menuRef} className="relative">
+              <button onClick={() => setMenuOpen((o) => !o)} aria-label="Compte" aria-expanded={menuOpen}>
+                <User size={19} strokeWidth={1.6} />
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full mt-3 w-44 border border-line bg-white py-2 shadow-sm">
+                  <Link to="/login" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
+                    Se connecter
+                  </Link>
+                  <Link to="/register" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
+                    Créer un compte
+                  </Link>
+                </div>
+              )}
+            </div>
           )}
 
           <Link to="/cart" className="relative" aria-label="Panier">
