@@ -130,6 +130,9 @@ export default function Navbar() {
               </button>
               {menuOpen && (
                 <div className="absolute right-0 top-full mt-3 w-44 border border-line bg-white py-2 shadow-sm">
+                  <Link to="/profile" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
+                    Mon profil
+                  </Link>
                   <Link to="/orders" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
                     Mes commandes
                   </Link>

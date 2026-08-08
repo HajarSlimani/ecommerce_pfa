@@ -11,6 +11,7 @@ import ProductDetailPage from '../pages/ProductDetailPage'
 import CartPage from '../pages/CartPage'
 import OrderConfirmationPage from '../pages/OrderConfirmationPage'
 import OrderHistoryPage from '../pages/OrderHistoryPage'
+import ProfilePage from '../pages/ProfilePage'
 import LoginPage from '../pages/LoginPage'
 import RegisterPage from '../pages/RegisterPage'
 
@@ -64,6 +65,7 @@ export default function AppRouter() {
           <Route element={<ProtectedRoute />}>
             <Route path="/orders" element={<OrderHistoryPage />} />
             <Route path="/orders/confirmation/:id" element={<OrderConfirmationPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
           </Route>
 
           <Route element={<AdminRoute />}>

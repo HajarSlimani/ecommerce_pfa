@@ -1,0 +1,438 @@
+diff --git a/backend/src/main/java/com/ecommerce/auth/UserController.java b/backend/src/main/java/com/ecommerce/auth/UserController.java
+new file mode 100644
+index 0000000..facf599
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/auth/UserController.java
+@@ -0,0 +1,41 @@
++package com.ecommerce.auth;
++
++import com.ecommerce.auth.dto.ChangePasswordRequest;
++import com.ecommerce.auth.dto.UpdateProfileRequest;
++import com.ecommerce.auth.dto.UserDTO;
++import jakarta.validation.Valid;
++import lombok.RequiredArgsConstructor;
++import org.springframework.http.ResponseEntity;
++import org.springframework.security.core.annotation.AuthenticationPrincipal;
++import org.springframework.web.bind.annotation.*;
++
++/**
++ * Endpoints "/me" plutôt que "/users/{id}" : évite toute question d'IDOR par
++ * construction (l'utilisateur ne peut agir que sur son propre profil, l'id
++ * vient du token JWT, jamais de l'URL).
++ */
++@RestController
++@RequestMapping("/api/users/me")
++@RequiredArgsConstructor
++public class UserController {
++
++    private final UserService userService;
++
++    @GetMapping
++    public ResponseEntity<UserDTO> getProfile(@AuthenticationPrincipal UserPrincipal principal) {
++        return ResponseEntity.ok(userService.getProfile(principal.getId()));
++    }
++
++    @PatchMapping
++    public ResponseEntity<UserDTO> updateProfile(@AuthenticationPrincipal UserPrincipal principal,
++                                                  @Valid @RequestBody UpdateProfileRequest request) {
++        return ResponseEntity.ok(userService.updateProfile(principal.getId(), request));
++    }
++
++    @PostMapping("/password")
++    public ResponseEntity<Void> changePassword(@AuthenticationPrincipal UserPrincipal principal,
++                                                @Valid @RequestBody ChangePasswordRequest request) {
++        userService.changePassword(principal.getId(), request);
++        return ResponseEntity.noContent().build();
++    }
++}
+diff --git a/backend/src/main/java/com/ecommerce/auth/UserService.java b/backend/src/main/java/com/ecommerce/auth/UserService.java
+new file mode 100644
+index 0000000..19dbd4f
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/auth/UserService.java
+@@ -0,0 +1,57 @@
++package com.ecommerce.auth;
++
++import com.ecommerce.auth.dto.ChangePasswordRequest;
++import com.ecommerce.auth.dto.UpdateProfileRequest;
++import com.ecommerce.auth.dto.UserDTO;
++import com.ecommerce.common.exception.BadRequestException;
++import com.ecommerce.common.exception.ResourceNotFoundException;
++import lombok.RequiredArgsConstructor;
++import org.springframework.security.crypto.password.PasswordEncoder;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.annotation.Transactional;
++
++@Service
++@RequiredArgsConstructor
++public class UserService {
++
++    private final UserRepository userRepository;
++    private final PasswordEncoder passwordEncoder;
++
++    public UserDTO getProfile(Long userId) {
++        return toDTO(findUser(userId));
++    }
++
++    @Transactional
++    public UserDTO updateProfile(Long userId, UpdateProfileRequest request) {
++        User user = findUser(userId);
++        user.setFullName(request.getFullName());
++        return toDTO(userRepository.save(user));
++    }
++
++    @Transactional
++    public void changePassword(Long userId, ChangePasswordRequest request) {
++        User user = findUser(userId);
++
++        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
++            throw new BadRequestException("Mot de passe actuel incorrect");
++        }
++
++        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
++        userRepository.save(user);
++    }
++
++    private User findUser(Long userId) {
++        return userRepository.findById(userId)
++                .orElseThrow(() -> new ResourceNotFoundException("Utilisateur introuvable : " + userId));
++    }
++
++    private UserDTO toDTO(User user) {
++        return UserDTO.builder()
++                .id(user.getId())
++                .email(user.getEmail())
++                .fullName(user.getFullName())
++                .role(user.getRole())
++                .createdAt(user.getCreatedAt())
++                .build();
++    }
++}
+diff --git a/backend/src/main/java/com/ecommerce/auth/dto/ChangePasswordRequest.java b/backend/src/main/java/com/ecommerce/auth/dto/ChangePasswordRequest.java
+new file mode 100644
+index 0000000..3d60a97
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/auth/dto/ChangePasswordRequest.java
+@@ -0,0 +1,18 @@
++package com.ecommerce.auth.dto;
++
++import jakarta.validation.constraints.NotBlank;
++import jakarta.validation.constraints.Size;
++import lombok.Getter;
++import lombok.Setter;
++
++@Getter
++@Setter
++public class ChangePasswordRequest {
++
++    @NotBlank
++    private String currentPassword;
++
++    @NotBlank
++    @Size(min = 8, message = "Le mot de passe doit contenir au moins 8 caractères")
++    private String newPassword;
++}
+diff --git a/backend/src/main/java/com/ecommerce/auth/dto/UpdateProfileRequest.java b/backend/src/main/java/com/ecommerce/auth/dto/UpdateProfileRequest.java
+new file mode 100644
+index 0000000..87c9373
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/auth/dto/UpdateProfileRequest.java
+@@ -0,0 +1,19 @@
++package com.ecommerce.auth.dto;
++
++import jakarta.validation.constraints.NotBlank;
++import lombok.Getter;
++import lombok.Setter;
++
++/**
++ * L'email n'est volontairement pas modifiable ici : c'est l'identifiant de
++ * connexion (unique en base, utilisé dans le JWT comme subject), le changer
++ * demanderait une revérification (email de confirmation) qu'on n'a pas
++ * encore. Seul le nom complet est éditable pour l'instant.
++ */
++@Getter
++@Setter
++public class UpdateProfileRequest {
++
++    @NotBlank
++    private String fullName;
++}
+diff --git a/backend/src/main/java/com/ecommerce/auth/dto/UserDTO.java b/backend/src/main/java/com/ecommerce/auth/dto/UserDTO.java
+new file mode 100644
+index 0000000..66a3972
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/auth/dto/UserDTO.java
+@@ -0,0 +1,23 @@
++package com.ecommerce.auth.dto;
++
++import com.ecommerce.common.enums.Role;
++import lombok.AllArgsConstructor;
++import lombok.Builder;
++import lombok.Getter;
++import lombok.NoArgsConstructor;
++import lombok.Setter;
++
++import java.time.Instant;
++
++@Getter
++@Setter
++@NoArgsConstructor
++@Builder
++@AllArgsConstructor
++public class UserDTO {
++    private Long id;
++    private String email;
++    private String fullName;
++    private Role role;
++    private Instant createdAt;
++}
+diff --git a/frontend/src/api/userApi.js b/frontend/src/api/userApi.js
+new file mode 100644
+index 0000000..8fd70a5
+--- /dev/null
++++ b/frontend/src/api/userApi.js
+@@ -0,0 +1,7 @@
++import axiosInstance from './axiosInstance'
++
++export const userApi = {
++  getProfile: () => axiosInstance.get('/users/me').then((r) => r.data),
++  updateProfile: (data) => axiosInstance.patch('/users/me', data).then((r) => r.data),
++  changePassword: (data) => axiosInstance.post('/users/me/password', data).then((r) => r.data),
++}
+diff --git a/frontend/src/components/common/Navbar.jsx b/frontend/src/components/common/Navbar.jsx
+index 505cbe1..3d8985e 100644
+--- a/frontend/src/components/common/Navbar.jsx
++++ b/frontend/src/components/common/Navbar.jsx
+@@ -130,6 +130,9 @@ export default function Navbar() {
+               </button>
+               {menuOpen && (
+                 <div className="absolute right-0 top-full mt-3 w-44 border border-line bg-white py-2 shadow-sm">
++                  <Link to="/profile" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
++                    Mon profil
++                  </Link>
+                   <Link to="/orders" className="block px-4 py-2 text-sm text-ink hover:bg-surface-muted">
+                     Mes commandes
+                   </Link>
+diff --git a/frontend/src/hooks/useProfile.js b/frontend/src/hooks/useProfile.js
+new file mode 100644
+index 0000000..e4565b0
+--- /dev/null
++++ b/frontend/src/hooks/useProfile.js
+@@ -0,0 +1,26 @@
++import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
++import { userApi } from '../api/userApi'
++import { useAuth } from './useAuth'
++
++export function useProfile() {
++  const { isAuthenticated } = useAuth()
++  return useQuery({
++    queryKey: ['profile'],
++    queryFn: userApi.getProfile,
++    enabled: isAuthenticated,
++  })
++}
++
++export function useUpdateProfile() {
++  const queryClient = useQueryClient()
++  return useMutation({
++    mutationFn: userApi.updateProfile,
++    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['profile'] }),
++  })
++}
++
++export function useChangePassword() {
++  return useMutation({
++    mutationFn: userApi.changePassword,
++  })
++}
+diff --git a/frontend/src/pages/ProfilePage.jsx b/frontend/src/pages/ProfilePage.jsx
+new file mode 100644
+index 0000000..fb7bcb6
+--- /dev/null
++++ b/frontend/src/pages/ProfilePage.jsx
+@@ -0,0 +1,165 @@
++import { useState, useEffect } from 'react'
++import toast from 'react-hot-toast'
++import { Eye, EyeOff } from 'lucide-react'
++import { useProfile, useUpdateProfile, useChangePassword } from '../hooks/useProfile'
++import LoadingSpinner from '../components/common/LoadingSpinner'
++import ErrorBanner from '../components/common/ErrorBanner'
++
++const memberSince = (isoString) =>
++  isoString
++    ? new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(isoString))
++    : '—'
++
++export default function ProfilePage() {
++  const { data: profile, isLoading, isError } = useProfile()
++  const updateProfile = useUpdateProfile()
++  const changePassword = useChangePassword()
++
++  const [fullName, setFullName] = useState('')
++  useEffect(() => {
++    if (profile?.fullName) setFullName(profile.fullName)
++  }, [profile?.fullName])
++
++  const [passwords, setPasswords] = useState({ current: '', next: '', confirm: '' })
++  const [showPasswords, setShowPasswords] = useState(false)
++
++  if (isLoading) {
++    return (
++      <div className="mx-auto max-w-2xl px-6 py-24">
++        <LoadingSpinner label="Chargement du profil…" />
++      </div>
++    )
++  }
++
++  if (isError || !profile) {
++    return (
++      <div className="mx-auto max-w-2xl px-6 py-24">
++        <ErrorBanner message="Impossible de charger le profil." />
++      </div>
++    )
++  }
++
++  const handleSaveInfo = (e) => {
++    e.preventDefault()
++    updateProfile.mutate(
++      { fullName },
++      {
++        onSuccess: () => toast.success('Profil mis à jour'),
++        onError: (err) => toast.error(err.response?.data?.message || 'Échec de la mise à jour'),
++      }
++    )
++  }
++
++  const handleChangePassword = (e) => {
++    e.preventDefault()
++    if (passwords.next !== passwords.confirm) {
++      toast.error('Les nouveaux mots de passe ne correspondent pas')
++      return
++    }
++    changePassword.mutate(
++      { currentPassword: passwords.current, newPassword: passwords.next },
++      {
++        onSuccess: () => {
++          toast.success('Mot de passe modifié')
++          setPasswords({ current: '', next: '', confirm: '' })
++        },
++        onError: (err) => toast.error(err.response?.data?.message || 'Échec du changement de mot de passe'),
++      }
++    )
++  }
++
++  const inputClass =
++    'border border-line bg-transparent px-4 py-3 text-sm text-ink outline-none transition placeholder:text-ink-soft focus:border-ink disabled:text-ink-soft disabled:cursor-not-allowed'
++
++  return (
++    <div className="mx-auto max-w-2xl px-6 py-14">
++      <p className="eyebrow mb-3">Compte</p>
++      <h1 className="font-display text-4xl font-medium text-ink">Mon profil</h1>
++      <p className="mt-2 text-sm text-ink-soft">Membre depuis le {memberSince(profile.createdAt)}</p>
++
++      <form onSubmit={handleSaveInfo} className="mt-10 flex flex-col gap-5 border border-line p-6">
++        <p className="eyebrow">Informations</p>
++
++        <div className="flex flex-col gap-1.5">
++          <label className="text-xs text-ink-soft">Nom complet</label>
++          <input
++            required
++            value={fullName}
++            onChange={(e) => setFullName(e.target.value)}
++            className={inputClass}
++          />
++        </div>
++
++        <div className="flex flex-col gap-1.5">
++          <label className="text-xs text-ink-soft">Email</label>
++          <input value={profile.email} disabled className={inputClass} />
++          <p className="text-xs text-ink-soft">Non modifiable pour l’instant.</p>
++        </div>
++
++        <button
++          type="submit"
++          disabled={updateProfile.isPending}
++          className="mt-2 self-start rounded-full bg-ink px-6 py-3 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-40"
++        >
++          {updateProfile.isPending ? 'Enregistrement…' : 'Enregistrer'}
++        </button>
++      </form>
++
++      <form onSubmit={handleChangePassword} className="mt-8 flex flex-col gap-5 border border-line p-6">
++        <div className="flex items-center justify-between">
++          <p className="eyebrow">Mot de passe</p>
++          <button
++            type="button"
++            onClick={() => setShowPasswords((s) => !s)}
++            className="flex items-center gap-1.5 text-xs text-ink-soft transition hover:text-ink"
++          >
++            {showPasswords ? <EyeOff size={14} /> : <Eye size={14} />}
++            {showPasswords ? 'Masquer' : 'Afficher'}
++          </button>
++        </div>
++
++        <div className="flex flex-col gap-1.5">
++          <label className="text-xs text-ink-soft">Mot de passe actuel</label>
++          <input
++            required
++            type={showPasswords ? 'text' : 'password'}
++            value={passwords.current}
++            onChange={(e) => setPasswords({ ...passwords, current: e.target.value })}
++            className={inputClass}
++          />
++        </div>
++
++        <div className="flex flex-col gap-1.5">
++          <label className="text-xs text-ink-soft">Nouveau mot de passe</label>
++          <input
++            required
++            minLength={8}
++            type={showPasswords ? 'text' : 'password'}
++            value={passwords.next}
++            onChange={(e) => setPasswords({ ...passwords, next: e.target.value })}
++            className={inputClass}
++          />
++        </div>
++
++        <div className="flex flex-col gap-1.5">
++          <label className="text-xs text-ink-soft">Confirmer le nouveau mot de passe</label>
++          <input
++            required
++            type={showPasswords ? 'text' : 'password'}
++            value={passwords.confirm}
++            onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })}
++            className={inputClass}
++          />
++        </div>
++
++        <button
++          type="submit"
++          disabled={changePassword.isPending}
++          className="mt-2 self-start rounded-full bg-ink px-6 py-3 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-40"
++        >
++          {changePassword.isPending ? 'Modification…' : 'Changer le mot de passe'}
++        </button>
++      </form>
++    </div>
++  )
++}
+diff --git a/frontend/src/routes/AppRouter.jsx b/frontend/src/routes/AppRouter.jsx
+index 6e24a0f..7e8000d 100644
+--- a/frontend/src/routes/AppRouter.jsx
++++ b/frontend/src/routes/AppRouter.jsx
+@@ -11,6 +11,7 @@ import ProductDetailPage from '../pages/ProductDetailPage'
+ import CartPage from '../pages/CartPage'
+ import OrderConfirmationPage from '../pages/OrderConfirmationPage'
+ import OrderHistoryPage from '../pages/OrderHistoryPage'
++import ProfilePage from '../pages/ProfilePage'
+ import LoginPage from '../pages/LoginPage'
+ import RegisterPage from '../pages/RegisterPage'
+ 
+@@ -64,6 +65,7 @@ export default function AppRouter() {
+           <Route element={<ProtectedRoute />}>
+             <Route path="/orders" element={<OrderHistoryPage />} />
+             <Route path="/orders/confirmation/:id" element={<OrderConfirmationPage />} />
++            <Route path="/profile" element={<ProfilePage />} />
+           </Route>
+ 
+           <Route element={<AdminRoute />}>
