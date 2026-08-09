@@ -9,6 +9,7 @@ import com.ecommerce.common.enums.Grade;
 import com.ecommerce.common.enums.UnitStatus;
 import com.ecommerce.common.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
@@ -23,6 +24,7 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final ProductUnitRepository productUnitRepository;
+    private final CacheManager cacheManager;
 
     /**
      * Retourne PageResponse (DTO maison) plutôt que Page/PageImpl de Spring
@@ -123,6 +125,33 @@ public class ProductService {
         return toDTO(productRepository.save(product));
     }
 
+    /**
+     * Contrairement à setColorImage (qui ne touche qu'une sous-donnée), une
+     * édition ici peut changer le nom/catégorie/image affichés partout
+     * (Boutique, home, fiche produit) → on évince les deux caches, pas
+     * seulement productVariants.
+     */
+    @CacheEvict(value = "products", allEntries = true)
+    public ProductDTO updateProduct(Long productId, UpdateProductRequest request) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Produit introuvable : " + productId));
+
+        product.setName(request.getName());
+        product.setDescription(request.getDescription());
+        product.setBrand(request.getBrand());
+        product.setCategory(request.getCategory());
+        product.setImageUrl(request.getImageUrl());
+
+        ProductDTO dto = toDTO(productRepository.save(product));
+        evictProductVariants(productId);
+        return dto;
+    }
+
+    private void evictProductVariants(Long productId) {
+        var cache = cacheManager.getCache("productVariants");
+        if (cache != null) cache.evict(productId);
+    }
+
     @org.springframework.cache.annotation.CacheEvict(value = "productVariants", key = "#productId")
     public void addUnit(Long productId, CreateProductUnitRequest request) {
         Product product = productRepository.findById(productId)
@@ -138,6 +167,47 @@ public class ProductService {
                 .build();
 
         productUnitRepository.save(unit);
+    }
+
+    /** Vue admin : toutes les unités d'un produit, tous statuts. */
+    public List<ProductUnitDTO> getUnits(Long productId) {
+        return productUnitRepository.findByProductIdOrderByEnteredStockAtDesc(productId).stream()
+                .map(this::toUnitDTO)
+                .toList();
+    }
+
+    /**
+     * Changement de statut manuel (ex: marquer une unité DEFECTIVE suite à un
+     * contrôle qualité, ou la repasser AVAILABLE). Évince productVariants
+     * puisque ça affecte directement le stock affiché sur la fiche produit.
+     */
+    public ProductUnitDTO updateUnitStatus(Long unitId, UnitStatus status) {
+        var unit = productUnitRepository.findById(unitId)
+                .orElseThrow(() -> new ResourceNotFoundException("Unité introuvable : " + unitId));
+
+        unit.setStatus(status);
+        if (status == UnitStatus.SOLD && unit.getSoldAt() == null) {
+            unit.setSoldAt(java.time.Instant.now());
+        } else if (status == UnitStatus.AVAILABLE) {
+            unit.setSoldAt(null);
+        }
+        productUnitRepository.save(unit);
+
+        evictProductVariants(unit.getProduct().getId());
+        return toUnitDTO(unit);
+    }
+
+    private ProductUnitDTO toUnitDTO(com.ecommerce.catalogue.entity.ProductUnit unit) {
+        return ProductUnitDTO.builder()
+                .id(unit.getId())
+                .serialNumber(unit.getSerialNumber())
+                .grade(unit.getGrade())
+                .color(unit.getColor())
+                .status(unit.getStatus())
+                .currentPrice(unit.getCurrentPrice())
+                .enteredStockAt(unit.getEnteredStockAt())
+                .soldAt(unit.getSoldAt())
+                .build();
     }
 
     /**

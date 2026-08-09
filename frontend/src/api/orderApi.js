@@ -5,4 +5,11 @@ export const orderApi = {
   getById: (id) => axiosInstance.get(`/orders/${id}`).then((r) => r.data),
   getForUser: (userId, { page = 0, size = 10 } = {}) =>
     axiosInstance.get(`/orders/user/${userId}`, { params: { page, size } }).then((r) => r.data),
+
+  // Vue admin : toutes les commandes, tous utilisateurs confondus.
+  adminGetAll: ({ page = 0, size = 20 } = {}) =>
+    axiosInstance.get('/admin/orders', { params: { page, size } }).then((r) => r.data),
+
+  adminUpdateStatus: (orderId, status) =>
+    axiosInstance.patch(`/admin/orders/${orderId}/status`, { status }).then((r) => r.data),
 }

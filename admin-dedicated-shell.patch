@@ -1,0 +1,685 @@
+diff --git a/backend/src/main/java/com/ecommerce/auth/AdminUserController.java b/backend/src/main/java/com/ecommerce/auth/AdminUserController.java
+new file mode 100644
+index 0000000..14b2d7c
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/auth/AdminUserController.java
+@@ -0,0 +1,30 @@
++package com.ecommerce.auth;
++
++import com.ecommerce.auth.dto.UserDTO;
++import com.ecommerce.common.dto.PageResponse;
++import lombok.RequiredArgsConstructor;
++import org.springframework.data.domain.Pageable;
++import org.springframework.http.ResponseEntity;
++import org.springframework.security.access.prepost.PreAuthorize;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++/**
++ * Lecture seule pour l'instant (voir UserController pour la gestion de son
++ * propre profil) — pas d'action de promotion/rétrogradation de rôle demandée
++ * pour cette passe.
++ */
++@RestController
++@RequestMapping("/api/admin/users")
++@PreAuthorize("hasRole('ADMIN')")
++@RequiredArgsConstructor
++public class AdminUserController {
++
++    private final UserService userService;
++
++    @GetMapping
++    public ResponseEntity<PageResponse<UserDTO>> getAllUsers(Pageable pageable) {
++        return ResponseEntity.ok(userService.getAllUsers(pageable));
++    }
++}
+diff --git a/backend/src/main/java/com/ecommerce/auth/UserService.java b/backend/src/main/java/com/ecommerce/auth/UserService.java
+index 19dbd4f..c692443 100644
+--- a/backend/src/main/java/com/ecommerce/auth/UserService.java
++++ b/backend/src/main/java/com/ecommerce/auth/UserService.java
+@@ -21,6 +21,11 @@ public class UserService {
+         return toDTO(findUser(userId));
+     }
+ 
++    /** Vue admin : liste de tous les utilisateurs (lecture seule pour l'instant). */
++    public com.ecommerce.common.dto.PageResponse<UserDTO> getAllUsers(org.springframework.data.domain.Pageable pageable) {
++        return com.ecommerce.common.dto.PageResponse.from(userRepository.findAll(pageable), this::toDTO);
++    }
++
+     @Transactional
+     public UserDTO updateProfile(Long userId, UpdateProfileRequest request) {
+         User user = findUser(userId);
+diff --git a/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java b/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java
+index 7764e1c..451479d 100644
+--- a/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java
++++ b/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java
+@@ -10,4 +10,6 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
+ 
+     /** Vue admin : toutes les commandes, tous utilisateurs confondus. */
+     Page<Order> findAllByOrderByCreatedAtDesc(Pageable pageable);
++
++    long countByStatus(com.ecommerce.common.enums.OrderStatus status);
+ }
+diff --git a/backend/src/main/java/com/ecommerce/common/controller/AdminStatsController.java b/backend/src/main/java/com/ecommerce/common/controller/AdminStatsController.java
+new file mode 100644
+index 0000000..6d62668
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/common/controller/AdminStatsController.java
+@@ -0,0 +1,24 @@
++package com.ecommerce.common.controller;
++
++import com.ecommerce.common.dto.AdminStatsDTO;
++import com.ecommerce.common.service.AdminStatsService;
++import lombok.RequiredArgsConstructor;
++import org.springframework.http.ResponseEntity;
++import org.springframework.security.access.prepost.PreAuthorize;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++@RestController
++@RequestMapping("/api/admin/stats")
++@PreAuthorize("hasRole('ADMIN')")
++@RequiredArgsConstructor
++public class AdminStatsController {
++
++    private final AdminStatsService adminStatsService;
++
++    @GetMapping
++    public ResponseEntity<AdminStatsDTO> getStats() {
++        return ResponseEntity.ok(adminStatsService.getStats());
++    }
++}
+diff --git a/backend/src/main/java/com/ecommerce/common/dto/AdminStatsDTO.java b/backend/src/main/java/com/ecommerce/common/dto/AdminStatsDTO.java
+new file mode 100644
+index 0000000..b81d1e5
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/common/dto/AdminStatsDTO.java
+@@ -0,0 +1,15 @@
++package com.ecommerce.common.dto;
++
++import lombok.AllArgsConstructor;
++import lombok.Builder;
++import lombok.Getter;
++
++@Getter
++@Builder
++@AllArgsConstructor
++public class AdminStatsDTO {
++    private long totalProducts;
++    private long totalOrders;
++    private long pendingOrders;
++    private long totalUsers;
++}
+diff --git a/backend/src/main/java/com/ecommerce/common/service/AdminStatsService.java b/backend/src/main/java/com/ecommerce/common/service/AdminStatsService.java
+new file mode 100644
+index 0000000..7b40098
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/common/service/AdminStatsService.java
+@@ -0,0 +1,33 @@
++package com.ecommerce.common.service;
++
++import com.ecommerce.auth.UserRepository;
++import com.ecommerce.catalogue.repository.ProductRepository;
++import com.ecommerce.commande.repository.OrderRepository;
++import com.ecommerce.common.dto.AdminStatsDTO;
++import com.ecommerce.common.enums.OrderStatus;
++import lombok.RequiredArgsConstructor;
++import org.springframework.stereotype.Service;
++
++/**
++ * Compteurs simples pour le tableau de bord admin (vue générale, distincte
++ * de la page "Pricing Dynamique" qui, elle, montre l'impact du moteur de
++ * pricing). Traverse plusieurs modules (catalogue/commande/auth), d'où sa
++ * place ici plutôt que dans un des services métier existants.
++ */
++@Service
++@RequiredArgsConstructor
++public class AdminStatsService {
++
++    private final ProductRepository productRepository;
++    private final OrderRepository orderRepository;
++    private final UserRepository userRepository;
++
++    public AdminStatsDTO getStats() {
++        return AdminStatsDTO.builder()
++                .totalProducts(productRepository.count())
++                .totalOrders(orderRepository.count())
++                .pendingOrders(orderRepository.countByStatus(OrderStatus.PENDING))
++                .totalUsers(userRepository.count())
++                .build();
++    }
++}
+diff --git a/frontend/src/api/adminApi.js b/frontend/src/api/adminApi.js
+new file mode 100644
+index 0000000..669ecc5
+--- /dev/null
++++ b/frontend/src/api/adminApi.js
+@@ -0,0 +1,7 @@
++import axiosInstance from './axiosInstance'
++
++export const adminApi = {
++  getStats: () => axiosInstance.get('/admin/stats').then((r) => r.data),
++  getUsers: ({ page = 0, size = 20 } = {}) =>
++    axiosInstance.get('/admin/users', { params: { page, size } }).then((r) => r.data),
++}
+diff --git a/frontend/src/components/admin/AdminHeader.jsx b/frontend/src/components/admin/AdminHeader.jsx
+new file mode 100644
+index 0000000..a5e6ae5
+--- /dev/null
++++ b/frontend/src/components/admin/AdminHeader.jsx
+@@ -0,0 +1,70 @@
++import { useState, useEffect, useRef } from 'react'
++import { useNavigate, useLocation } from 'react-router-dom'
++import { Search, User } from 'lucide-react'
++import { useAuth } from '../../hooks/useAuth'
++
++export default function AdminHeader() {
++  const { user, logout } = useAuth()
++  const navigate = useNavigate()
++  const location = useLocation()
++  const [query, setQuery] = useState('')
++  const [menuOpen, setMenuOpen] = useState(false)
++  const menuRef = useRef(null)
++
++  useEffect(() => {
++    if (!menuOpen) return
++    const onClickOutside = (e) => {
++      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false)
++    }
++    document.addEventListener('mousedown', onClickOutside)
++    return () => document.removeEventListener('mousedown', onClickOutside)
++  }, [menuOpen])
++
++  const handleSearch = (e) => {
++    e.preventDefault()
++    if (!query.trim()) return
++    navigate(`/admin/products?q=${encodeURIComponent(query.trim())}`)
++  }
++
++  const handleLogout = () => {
++    logout()
++    navigate('/')
++  }
++
++  return (
++    <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-line bg-surface px-6">
++      <form onSubmit={handleSearch} className="flex items-center gap-2 text-ink-soft">
++        <Search size={16} strokeWidth={1.6} />
++        <input
++          value={query}
++          onChange={(e) => setQuery(e.target.value)}
++          placeholder="Rechercher un produit…"
++          className="w-64 bg-transparent text-sm text-ink placeholder:text-ink-soft focus:outline-none"
++        />
++      </form>
++
++      <div ref={menuRef} className="relative">
++        <button
++          onClick={() => setMenuOpen((o) => !o)}
++          className="flex items-center gap-2 text-sm text-ink"
++          aria-expanded={menuOpen}
++        >
++          <span className="flex h-7 w-7 items-center justify-center border border-line text-ink-soft">
++            <User size={14} strokeWidth={1.6} />
++          </span>
++          <span className="hidden sm:inline">{user?.email}</span>
++        </button>
++        {menuOpen && (
++          <div className="absolute right-0 top-full mt-2 w-44 border border-line bg-white py-2 shadow-sm">
++            <button
++              onClick={handleLogout}
++              className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-surface-muted"
++            >
++              Déconnexion
++            </button>
++          </div>
++        )}
++      </div>
++    </header>
++  )
++}
+diff --git a/frontend/src/components/admin/AdminSidebar.jsx b/frontend/src/components/admin/AdminSidebar.jsx
+index 9200c2d..63cb9e7 100644
+--- a/frontend/src/components/admin/AdminSidebar.jsx
++++ b/frontend/src/components/admin/AdminSidebar.jsx
+@@ -2,15 +2,18 @@ import { NavLink, Link } from 'react-router-dom'
+ import { ArrowLeft } from 'lucide-react'
+ 
+ const LINKS = [
+-  { to: '/admin', label: 'Tableau de bord', end: true },
++  { to: '/admin', label: 'Dashboard', end: true },
+   { to: '/admin/products', label: 'Produits' },
+   { to: '/admin/orders', label: 'Commandes' },
+-  { to: '/admin/pricing', label: 'Historique des prix' },
++  { to: '/admin/pricing-dynamique', label: 'Pricing Dynamique' },
++  { to: '/admin/pricing', label: 'Historique des Prix' },
++  { to: '/admin/users', label: 'Utilisateurs' },
++  { to: '/admin/settings', label: 'Paramètres' },
+ ]
+ 
+ export default function AdminSidebar() {
+   return (
+-    <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-surface px-5 py-8">
++    <aside className="fixed inset-y-0 left-0 z-20 flex w-56 flex-col border-r border-line bg-surface px-5 py-8">
+       <Link to="/" className="font-display text-lg font-medium text-ink">
+         NewDev <span className="italic text-brand-500">Shop</span>
+       </Link>
+diff --git a/frontend/src/hooks/useAdmin.js b/frontend/src/hooks/useAdmin.js
+index 17a5e68..db78a4f 100644
+--- a/frontend/src/hooks/useAdmin.js
++++ b/frontend/src/hooks/useAdmin.js
+@@ -1,6 +1,24 @@
+ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+ import { productApi } from '../api/productApi'
+ import { orderApi } from '../api/orderApi'
++import { adminApi } from '../api/adminApi'
++
++// --- Tableau de bord ---
++
++export function useAdminStats() {
++  return useQuery({
++    queryKey: ['adminStats'],
++    queryFn: adminApi.getStats,
++  })
++}
++
++export function useAdminUsers(page = 0) {
++  return useQuery({
++    queryKey: ['adminUsers', page],
++    queryFn: () => adminApi.getUsers({ page }),
++    placeholderData: (prev) => prev,
++  })
++}
+ 
+ // --- Produits ---
+ 
+diff --git a/frontend/src/pages/LoginPage.jsx b/frontend/src/pages/LoginPage.jsx
+index 383306e..0563819 100644
+--- a/frontend/src/pages/LoginPage.jsx
++++ b/frontend/src/pages/LoginPage.jsx
+@@ -20,12 +20,20 @@ export default function LoginPage() {
+     e.preventDefault()
+     setIsSubmitting(true)
+     try {
+-      await login(form)
++      const res = await login(form)
+       // Le panier invité éventuel vient d'être fusionné côté backend :
+       // on invalide le cache pour refléter le panier fusionné.
+       queryClient.invalidateQueries({ queryKey: ['cart'] })
+       toast.success('Connexion réussie')
+-      navigate(location.state?.from?.pathname || '/')
++
++      const from = location.state?.from?.pathname
++      // Un admin qui se connecte atterrit sur le tableau de bord, sauf s'il
++      // venait spécifiquement d'une sous-page admin (lien direct, favori…).
++      if (res.role === 'ADMIN' && !from?.startsWith('/admin')) {
++        navigate('/admin')
++      } else {
++        navigate(from || '/')
++      }
+     } catch (err) {
+       toast.error(err.response?.data?.message || 'Identifiants invalides')
+     } finally {
+diff --git a/frontend/src/pages/admin/AdminDashboardPage.jsx b/frontend/src/pages/admin/AdminDashboardPage.jsx
+index 1f5ef05..4c64185 100644
+--- a/frontend/src/pages/admin/AdminDashboardPage.jsx
++++ b/frontend/src/pages/admin/AdminDashboardPage.jsx
+@@ -1,58 +1,41 @@
+-import { useState } from 'react'
+-import { usePricingImpact, usePricingHistory } from '../../hooks/usePricing'
++import { Link } from 'react-router-dom'
++import { useAdminStats } from '../../hooks/useAdmin'
+ import KpiCard from '../../components/admin/KpiCard'
+-import DateRangePicker from '../../components/admin/DateRangePicker'
+-import RevenueImpactChart from '../../components/admin/RevenueImpactChart'
+ import LoadingSpinner from '../../components/common/LoadingSpinner'
+-import { formatCurrency } from '../../utils/formatCurrency'
+-
+-function isoDaysAgo(days) {
+-  const d = new Date()
+-  d.setDate(d.getDate() - days)
+-  return d.toISOString().slice(0, 10)
+-}
++import ErrorBanner from '../../components/common/ErrorBanner'
+ 
+ export default function AdminDashboardPage() {
+-  const [range, setRange] = useState({ from: isoDaysAgo(30), to: isoDaysAgo(0) })
+-
+-  const from = `${range.from}T00:00:00Z`
+-  const to = `${range.to}T23:59:59Z`
+-
+-  const { data: impact, isLoading: impactLoading } = usePricingImpact(from, to)
+-  const { data: history, isLoading: historyLoading } = usePricingHistory({ size: 200 })
++  const { data: stats, isLoading, isError } = useAdminStats()
+ 
+   return (
+     <div>
+-      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+-        <div>
+-          <p className="eyebrow mb-3">Administration</p>
+-          <h1 className="font-display text-3xl font-medium text-ink">Vue d’ensemble</h1>
+-        </div>
+-        <DateRangePicker from={range.from} to={range.to} onChange={setRange} />
+-      </div>
++      <p className="eyebrow mb-3">Administration</p>
++      <h1 className="font-display text-3xl font-medium text-ink">Dashboard</h1>
+ 
+-      {impactLoading ? (
+-        <LoadingSpinner label="Calcul de l'impact revenu…" />
+-      ) : (
+-        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+-          <KpiCard label="Ajustements sur la période" value={impact?.totalAdjustments ?? 0} />
+-          <KpiCard
+-            label="Impact revenu estimé (cumulé)"
+-            value={formatCurrency(impact?.totalEstimatedRevenueImpact ?? 0)}
+-            accent={(impact?.totalEstimatedRevenueImpact ?? 0) >= 0 ? 'down' : 'up'}
+-          />
++      {isLoading && <div className="mt-8"><LoadingSpinner label="Chargement…" /></div>}
++      {isError && <div className="mt-8"><ErrorBanner message="Impossible de charger les statistiques." /></div>}
++
++      {stats && (
++        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
++          <KpiCard label="Produits" value={stats.totalProducts} />
++          <KpiCard label="Commandes" value={stats.totalOrders} />
+           <KpiCard
+-            label="Impact moyen / ajustement"
+-            value={formatCurrency(impact?.averageImpactPerAdjustment ?? 0)}
++            label="Commandes en attente"
++            value={stats.pendingOrders}
++            accent={stats.pendingOrders > 0 ? 'up' : 'ink'}
+           />
++          <KpiCard label="Utilisateurs" value={stats.totalUsers} />
+         </div>
+       )}
+ 
+-      {historyLoading ? (
+-        <LoadingSpinner label="Chargement de la tendance…" />
+-      ) : (
+-        <RevenueImpactChart historyEntries={history?.content} />
+-      )}
++      <div className="mt-10 flex flex-wrap gap-4 text-sm">
++        <Link to="/admin/pricing-dynamique" className="text-ink-soft underline transition hover:text-ink">
++          Voir l’impact du pricing dynamique →
++        </Link>
++        <Link to="/admin/orders" className="text-ink-soft underline transition hover:text-ink">
++          Gérer les commandes →
++        </Link>
++      </div>
+     </div>
+   )
+ }
+diff --git a/frontend/src/pages/admin/AdminLayout.jsx b/frontend/src/pages/admin/AdminLayout.jsx
+index 02ec813..1dc706f 100644
+--- a/frontend/src/pages/admin/AdminLayout.jsx
++++ b/frontend/src/pages/admin/AdminLayout.jsx
+@@ -1,13 +1,17 @@
+ import { Outlet } from 'react-router-dom'
+ import AdminSidebar from '../../components/admin/AdminSidebar'
++import AdminHeader from '../../components/admin/AdminHeader'
+ 
+ export default function AdminLayout() {
+   return (
+-    <div className="flex min-h-screen">
++    <div className="min-h-screen bg-surface-muted">
+       <AdminSidebar />
+-      <main className="flex-1 bg-surface-muted px-8 py-8">
+-        <Outlet />
+-      </main>
++      <div className="ml-56 flex min-h-screen flex-col">
++        <AdminHeader />
++        <main className="flex-1 px-8 py-8">
++          <Outlet />
++        </main>
++      </div>
+     </div>
+   )
+ }
+diff --git a/frontend/src/pages/admin/AdminPricingDynamicsPage.jsx b/frontend/src/pages/admin/AdminPricingDynamicsPage.jsx
+new file mode 100644
+index 0000000..30b96d0
+--- /dev/null
++++ b/frontend/src/pages/admin/AdminPricingDynamicsPage.jsx
+@@ -0,0 +1,58 @@
++import { useState } from 'react'
++import { usePricingImpact, usePricingHistory } from '../../hooks/usePricing'
++import KpiCard from '../../components/admin/KpiCard'
++import DateRangePicker from '../../components/admin/DateRangePicker'
++import RevenueImpactChart from '../../components/admin/RevenueImpactChart'
++import LoadingSpinner from '../../components/common/LoadingSpinner'
++import { formatCurrency } from '../../utils/formatCurrency'
++
++function isoDaysAgo(days) {
++  const d = new Date()
++  d.setDate(d.getDate() - days)
++  return d.toISOString().slice(0, 10)
++}
++
++export default function AdminPricingDynamicsPage() {
++  const [range, setRange] = useState({ from: isoDaysAgo(30), to: isoDaysAgo(0) })
++
++  const from = `${range.from}T00:00:00Z`
++  const to = `${range.to}T23:59:59Z`
++
++  const { data: impact, isLoading: impactLoading } = usePricingImpact(from, to)
++  const { data: history, isLoading: historyLoading } = usePricingHistory({ size: 200 })
++
++  return (
++    <div>
++      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
++        <div>
++          <p className="eyebrow mb-3">Administration</p>
++          <h1 className="font-display text-3xl font-medium text-ink">Pricing Dynamique</h1>
++        </div>
++        <DateRangePicker from={range.from} to={range.to} onChange={setRange} />
++      </div>
++
++      {impactLoading ? (
++        <LoadingSpinner label="Calcul de l'impact revenu…" />
++      ) : (
++        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
++          <KpiCard label="Ajustements sur la période" value={impact?.totalAdjustments ?? 0} />
++          <KpiCard
++            label="Impact revenu estimé (cumulé)"
++            value={formatCurrency(impact?.totalEstimatedRevenueImpact ?? 0)}
++            accent={(impact?.totalEstimatedRevenueImpact ?? 0) >= 0 ? 'down' : 'up'}
++          />
++          <KpiCard
++            label="Impact moyen / ajustement"
++            value={formatCurrency(impact?.averageImpactPerAdjustment ?? 0)}
++          />
++        </div>
++      )}
++
++      {historyLoading ? (
++        <LoadingSpinner label="Chargement de la tendance…" />
++      ) : (
++        <RevenueImpactChart historyEntries={history?.content} />
++      )}
++    </div>
++  )
++}
+diff --git a/frontend/src/pages/admin/AdminProductsPage.jsx b/frontend/src/pages/admin/AdminProductsPage.jsx
+index 5131835..db4b2af 100644
+--- a/frontend/src/pages/admin/AdminProductsPage.jsx
++++ b/frontend/src/pages/admin/AdminProductsPage.jsx
+@@ -1,4 +1,5 @@
+ import { useState } from 'react'
++import { useSearchParams } from 'react-router-dom'
+ import { useProducts, useProductDetail } from '../../hooks/useProducts'
+ import AdminProductList from '../../components/admin/AdminProductList'
+ import ProductEditForm from '../../components/admin/ProductEditForm'
+@@ -9,6 +10,11 @@ import ErrorBanner from '../../components/common/ErrorBanner'
+ 
+ export default function AdminProductsPage() {
+   const [selectedId, setSelectedId] = useState(null)
++  const [searchParams] = useSearchParams()
++  // Alimenté par la recherche globale du header admin (?q=...). Filtre
++  // simplement la liste déjà chargée en mémoire — pas besoin de taper sur
++  // /products/search ici, la liste admin n'est pas paginée.
++  const q = searchParams.get('q')?.toLowerCase() || ''
+ 
+   // Liste à plat, sans pagination : suffisant pour un catalogue de la taille
+   // d'un projet étudiant, et évite la complexité d'une pagination dans une
+@@ -16,12 +22,19 @@ export default function AdminProductsPage() {
+   const { data: listData, isLoading: isListLoading } = useProducts({ size: 100 })
+   const { data: detail, isLoading: isDetailLoading, isError: isDetailError } = useProductDetail(selectedId)
+ 
+-  const products = listData?.content || []
++  const products = (listData?.content || []).filter(
++    (p) => !q || p.name.toLowerCase().includes(q) || p.brand?.toLowerCase().includes(q)
++  )
+ 
+   return (
+     <div>
+       <p className="eyebrow mb-3">Administration</p>
+       <h1 className="font-display text-3xl font-medium text-ink">Produits</h1>
++      {q && (
++        <p className="mt-2 text-sm text-ink-soft">
++          Résultats pour « {searchParams.get('q')} » ({products.length})
++        </p>
++      )}
+ 
+       <div className="mt-8 flex gap-8">
+         {isListLoading ? (
+diff --git a/frontend/src/pages/admin/AdminSettingsPage.jsx b/frontend/src/pages/admin/AdminSettingsPage.jsx
+new file mode 100644
+index 0000000..4ae4c26
+--- /dev/null
++++ b/frontend/src/pages/admin/AdminSettingsPage.jsx
+@@ -0,0 +1,18 @@
++export default function AdminSettingsPage() {
++  return (
++    <div>
++      <p className="eyebrow mb-3">Administration</p>
++      <h1 className="font-display text-3xl font-medium text-ink">Paramètres</h1>
++
++      <div className="mt-8 flex flex-col items-start gap-2 border border-line bg-surface p-8">
++        <p className="text-sm text-ink">Bientôt disponible.</p>
++        <p className="max-w-md text-sm leading-relaxed text-ink-soft">
++          Pas encore de modèle de données pour des réglages globaux (devise,
++          taxes, seuils du moteur de pricing, etc.). Cette page est prête
++          côté navigation — le contenu sera ajouté quand ces réglages seront
++          définis.
++        </p>
++      </div>
++    </div>
++  )
++}
+diff --git a/frontend/src/pages/admin/AdminUsersPage.jsx b/frontend/src/pages/admin/AdminUsersPage.jsx
+new file mode 100644
+index 0000000..d5622a1
+--- /dev/null
++++ b/frontend/src/pages/admin/AdminUsersPage.jsx
+@@ -0,0 +1,56 @@
++import { useState } from 'react'
++import { useAdminUsers } from '../../hooks/useAdmin'
++import { formatDate } from '../../utils/formatDate'
++import Pagination from '../../components/common/Pagination'
++import LoadingSpinner from '../../components/common/LoadingSpinner'
++import ErrorBanner from '../../components/common/ErrorBanner'
++
++export default function AdminUsersPage() {
++  const [page, setPage] = useState(0)
++  const { data, isLoading, isError } = useAdminUsers(page)
++
++  return (
++    <div>
++      <p className="eyebrow mb-3">Administration</p>
++      <h1 className="font-display text-3xl font-medium text-ink">Utilisateurs</h1>
++
++      {isLoading && <div className="mt-8"><LoadingSpinner label="Chargement des utilisateurs…" /></div>}
++      {isError && <div className="mt-8"><ErrorBanner message="Impossible de charger les utilisateurs." /></div>}
++
++      {data && (
++        <div className="mt-8 border border-line bg-surface">
++          <div className="grid grid-cols-[1fr_1fr_100px_140px] gap-4 border-b border-line px-4 py-3 text-xs font-medium uppercase tracking-wide text-ink-soft">
++            <span>Email</span>
++            <span>Nom</span>
++            <span>Rôle</span>
++            <span>Inscrit le</span>
++          </div>
++
++          {data.content.map((u) => (
++            <div
++              key={u.id}
++              className="grid grid-cols-[1fr_1fr_100px_140px] items-center gap-4 border-b border-line px-4 py-3 text-sm last:border-b-0"
++            >
++              <span className="truncate text-ink">{u.email}</span>
++              <span className="truncate text-ink-soft">{u.fullName || '—'}</span>
++              <span
++                className={`text-xs font-medium uppercase tracking-wide ${
++                  u.role === 'ADMIN' ? 'text-brand-600' : 'text-ink-soft'
++                }`}
++              >
++                {u.role === 'ADMIN' ? 'Admin' : 'Client'}
++              </span>
++              <span className="text-xs text-ink-soft">{formatDate(u.createdAt)}</span>
++            </div>
++          ))}
++
++          {data.content.length === 0 && (
++            <p className="px-4 py-8 text-center text-sm text-ink-soft">Aucun utilisateur.</p>
++          )}
++        </div>
++      )}
++
++      {data && <Pagination page={page} totalPages={data.totalPages} onPageChange={setPage} />}
++    </div>
++  )
++}
+diff --git a/frontend/src/routes/AppRouter.jsx b/frontend/src/routes/AppRouter.jsx
+index 6cde907..76519e7 100644
+--- a/frontend/src/routes/AppRouter.jsx
++++ b/frontend/src/routes/AppRouter.jsx
+@@ -19,7 +19,10 @@ import AdminLayout from '../pages/admin/AdminLayout'
+ import AdminDashboardPage from '../pages/admin/AdminDashboardPage'
+ import AdminProductsPage from '../pages/admin/AdminProductsPage'
+ import AdminOrdersPage from '../pages/admin/AdminOrdersPage'
++import AdminPricingDynamicsPage from '../pages/admin/AdminPricingDynamicsPage'
+ import AdminPricingHistoryPage from '../pages/admin/AdminPricingHistoryPage'
++import AdminUsersPage from '../pages/admin/AdminUsersPage'
++import AdminSettingsPage from '../pages/admin/AdminSettingsPage'
+ 
+ // React Router ne fait pas défiler la page vers une ancre (#hash) tout seul
+ // lors d'une navigation côté client — contrairement à un lien HTML classique.
+@@ -46,14 +49,17 @@ function ScrollManager() {
+ 
+ export default function AppRouter() {
+   const location = useLocation()
++  const isAdminRoute = location.pathname.startsWith('/admin')
+   // Le hero de la home passe sous la navbar transparente ; les autres pages
+   // (fond clair dès le haut) ont besoin d'un padding pour ne pas passer dessous.
+-  const needsTopPadding = location.pathname !== '/'
++  // L'admin a son propre chrome (sidebar + header dédiés), donc ni navbar
++  // client ni padding ici.
++  const needsTopPadding = location.pathname !== '/' && !isAdminRoute
+ 
+   return (
+     <div className="flex min-h-screen flex-col">
+       <ScrollManager />
+-      <Navbar />
++      {!isAdminRoute && <Navbar />}
+       <div className={`flex-1 ${needsTopPadding ? 'pt-20' : ''}`}>
+         <Routes>
+           <Route path="/" element={<HomePage />} />
+@@ -74,14 +80,17 @@ export default function AppRouter() {
+               <Route index element={<AdminDashboardPage />} />
+               <Route path="products" element={<AdminProductsPage />} />
+               <Route path="orders" element={<AdminOrdersPage />} />
++              <Route path="pricing-dynamique" element={<AdminPricingDynamicsPage />} />
+               <Route path="pricing" element={<AdminPricingHistoryPage />} />
++              <Route path="users" element={<AdminUsersPage />} />
++              <Route path="settings" element={<AdminSettingsPage />} />
+             </Route>
+           </Route>
+ 
+           <Route path="*" element={<NotFound />} />
+         </Routes>
+       </div>
+-      <Footer />
++      {!isAdminRoute && <Footer />}
+     </div>
+   )
+ }

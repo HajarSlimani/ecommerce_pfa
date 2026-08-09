@@ -80,7 +80,7 @@ export default function Navbar() {
           to="/"
           className={`font-display text-xl font-medium tracking-tight ${textClass}`}
         >
-          NewDev <span className="italic text-brand-500">Shop</span>
+          Hajar <span className="italic text-brand-500">Shop</span>
         </Link>
 
         <nav className={`hidden items-center gap-8 text-sm font-medium sm:flex ${softTextClass}`}>

@@ -27,6 +27,16 @@ export const productApi = {
 
   create: (data) => axiosInstance.post('/products', data).then((r) => r.data),
 
+  update: (id, data) => axiosInstance.patch(`/products/${id}`, data).then((r) => r.data),
+
   addUnit: (productId, data) =>
     axiosInstance.post(`/products/${productId}/units`, data).then((r) => r.data),
+
+  getUnits: (productId) => axiosInstance.get(`/products/${productId}/units`).then((r) => r.data),
+
+  updateUnitStatus: (productId, unitId, status) =>
+    axiosInstance.patch(`/products/${productId}/units/${unitId}`, { status }).then((r) => r.data),
+
+  setColorImage: (productId, color, imageUrl) =>
+    axiosInstance.put(`/products/${productId}/color-images`, { color, imageUrl }).then((r) => r.data),
 }

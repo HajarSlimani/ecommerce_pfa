@@ -1,80 +1,82 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { productApi } from '../../api/productApi'
+import { GRADES } from '../../constants/catalogue'
+import { useAddUnit } from '../../hooks/useAdmin'
 
-const GRADES = ['NEUF', 'A', 'B', 'C']
-const EMPTY_FORM = { serialNumber: '', grade: 'A', color: '', currentPrice: '' }
+const EMPTY = { serialNumber: '', grade: 'NEUF', color: '', currentPrice: '' }
 
 export default function ProductUnitForm({ productId }) {
-  const [form, setForm] = useState(EMPTY_FORM)
-  const queryClient = useQueryClient()
+  const [form, setForm] = useState(EMPTY)
+  const addUnit = useAddUnit()
 
-  const mutation = useMutation({
-    mutationFn: (data) => productApi.addUnit(productId, data),
-    onSuccess: () => {
-      toast.success('Unité ajoutée')
-      queryClient.invalidateQueries({ queryKey: ['product', productId] })
-      setForm(EMPTY_FORM)
-    },
-    onError: (err) => toast.error(err.response?.data?.message || "Échec de l'ajout"),
-  })
+  const inputClass =
+    'border border-line bg-transparent px-3 py-2 text-sm text-ink outline-none transition placeholder:text-ink-soft focus:border-ink'
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    mutation.mutate({ ...form, currentPrice: Number(form.currentPrice) })
-  }
-
-  if (!productId) {
-    return <p className="text-xs text-ink-soft">Sélectionne un produit pour lui ajouter des unités.</p>
+    addUnit.mutate(
+      { productId, data: { ...form, currentPrice: parseFloat(form.currentPrice) } },
+      {
+        onSuccess: () => {
+          toast.success('Unité ajoutée')
+          setForm(EMPTY)
+        },
+        onError: (err) => toast.error(err.response?.data?.message || 'Échec de l’ajout'),
+      }
+    )
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-xl border border-surface-sunken bg-surface p-5">
-      <h3 className="font-display text-sm font-semibold">
-        Ajouter une unité — produit #{productId}
-      </h3>
-      <input
-        required
-        placeholder="Numéro de série"
-        value={form.serialNumber}
-        onChange={(e) => setForm({ ...form, serialNumber: e.target.value })}
-        className="rounded-md border border-surface-sunken px-3 py-2 font-mono text-sm"
-      />
-      <select
-        value={form.grade}
-        onChange={(e) => setForm({ ...form, grade: e.target.value })}
-        className="rounded-md border border-surface-sunken px-3 py-2 text-sm"
-      >
-        {GRADES.map((g) => (
-          <option key={g} value={g}>
-            {g}
-          </option>
-        ))}
-      </select>
-      <input
-        required
-        placeholder="Couleur (ex: Noir, Bleu…)"
-        value={form.color}
-        onChange={(e) => setForm({ ...form, color: e.target.value })}
-        className="rounded-md border border-surface-sunken px-3 py-2 text-sm"
-      />
-      <input
-        required
-        type="number"
-        step="0.01"
-        min="0.01"
-        placeholder="Prix courant"
-        value={form.currentPrice}
-        onChange={(e) => setForm({ ...form, currentPrice: e.target.value })}
-        className="rounded-md border border-surface-sunken px-3 py-2 font-mono text-sm"
-      />
+    <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3 border-t border-line pt-5">
+      <div className="flex flex-col gap-1.5">
+        <label className="text-xs text-ink-soft">N° de série</label>
+        <input
+          required
+          value={form.serialNumber}
+          onChange={(e) => setForm({ ...form, serialNumber: e.target.value })}
+          className={`w-36 ${inputClass}`}
+        />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <label className="text-xs text-ink-soft">Grade</label>
+        <select
+          value={form.grade}
+          onChange={(e) => setForm({ ...form, grade: e.target.value })}
+          className={inputClass}
+        >
+          {GRADES.map((g) => (
+            <option key={g.code} value={g.code}>{g.code}</option>
+          ))}
+        </select>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <label className="text-xs text-ink-soft">Couleur</label>
+        <input
+          required
+          value={form.color}
+          onChange={(e) => setForm({ ...form, color: e.target.value })}
+          placeholder="ex. Bleu"
+          className={`w-28 ${inputClass}`}
+        />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <label className="text-xs text-ink-soft">Prix</label>
+        <input
+          required
+          type="number"
+          step="0.01"
+          min="0.01"
+          value={form.currentPrice}
+          onChange={(e) => setForm({ ...form, currentPrice: e.target.value })}
+          className={`w-28 ${inputClass}`}
+        />
+      </div>
       <button
         type="submit"
-        disabled={mutation.isPending}
-        className="mt-1 rounded-md bg-ink py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-40"
+        disabled={addUnit.isPending}
+        className="rounded-full bg-ink px-5 py-2 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-40"
       >
-        {mutation.isPending ? 'Ajout…' : 'Ajouter l\u2019unité'}
+        {addUnit.isPending ? 'Ajout…' : '+ Ajouter une unité'}
       </button>
     </form>
   )

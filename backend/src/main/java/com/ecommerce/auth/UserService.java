@@ -21,6 +21,11 @@ public class UserService {
         return toDTO(findUser(userId));
     }
 
+    /** Vue admin : liste de tous les utilisateurs (lecture seule pour l'instant). */
+    public com.ecommerce.common.dto.PageResponse<UserDTO> getAllUsers(org.springframework.data.domain.Pageable pageable) {
+        return com.ecommerce.common.dto.PageResponse.from(userRepository.findAll(pageable), this::toDTO);
+    }
+
     @Transactional
     public UserDTO updateProfile(Long userId, UpdateProfileRequest request) {
         User user = findUser(userId);

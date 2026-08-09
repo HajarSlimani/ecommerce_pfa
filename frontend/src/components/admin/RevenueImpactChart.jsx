@@ -41,21 +41,21 @@ export default function RevenueImpactChart({ historyEntries }) {
 
   if (data.length === 0) {
     return (
-      <div className="flex h-72 items-center justify-center rounded-xl border border-surface-sunken bg-surface text-sm text-ink-soft">
+      <div className="flex h-72 items-center justify-center border border-line bg-surface text-sm text-ink-soft">
         Pas encore assez d’ajustements pour tracer une tendance.
       </div>
     )
   }
 
   return (
-    <div className="rounded-xl border border-surface-sunken bg-surface p-5">
-      <h3 className="mb-1 font-display text-sm font-semibold">Impact revenu cumulé — dynamique vs statique</h3>
+    <div className="border border-line bg-surface p-5">
+      <h3 className="mb-1 font-display text-base font-medium text-ink">Impact revenu cumulé — dynamique vs statique</h3>
       <p className="mb-4 text-xs text-ink-soft">
         Le scénario statique correspond à une absence d’ajustement de prix (référence à 0).
       </p>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#EEF0EC" />
+          <CartesianGrid strokeDasharray="3 3" stroke="#E4E2DB" />
           <XAxis
             dataKey="date"
             tickFormatter={(d) => formatDate(d).split(' ').slice(0, 2).join(' ')}
@@ -71,12 +71,12 @@ export default function RevenueImpactChart({ historyEntries }) {
             labelFormatter={(d) => formatDate(d)}
           />
           <Legend />
-          <ReferenceLine y={0} stroke="#78716C" strokeDasharray="4 4" label="Statique" />
+          <ReferenceLine y={0} stroke="#6E6E6B" strokeDasharray="4 4" label="Statique" />
           <Line
             type="monotone"
             dataKey="dynamique"
             name="Dynamique (cumulé)"
-            stroke="#0F766E"
+            stroke="#1D4ED8"
             strokeWidth={2}
             dot={false}
           />

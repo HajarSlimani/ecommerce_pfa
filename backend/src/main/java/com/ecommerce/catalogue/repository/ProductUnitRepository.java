@@ -24,6 +24,9 @@ public interface ProductUnitRepository extends JpaRepository<ProductUnit, Long> 
 
     List<ProductUnit> findByProductIdAndStatus(Long productId, UnitStatus status);
 
+    /** Toutes les unités d'un produit, tous statuts confondus — vue admin. */
+    List<ProductUnit> findByProductIdOrderByEnteredStockAtDesc(Long productId);
+
     /**
      * Sélectionne les N unités disponibles les plus anciennes (FIFO) pour un
      * produit + grade + couleur donnés, avec verrou pessimiste pour éviter la

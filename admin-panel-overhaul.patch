@@ -1,0 +1,1659 @@
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java b/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java
+index 5a1732f..dfec35a 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/controller/ProductController.java
+@@ -63,6 +63,13 @@ public class ProductController {
+         return ResponseEntity.ok(productService.createProduct(request));
+     }
+ 
++    @PatchMapping("/{id}")
++    @PreAuthorize("hasRole('ADMIN')")
++    public ResponseEntity<ProductDTO> update(@PathVariable Long id,
++                                              @Valid @RequestBody com.ecommerce.catalogue.dto.UpdateProductRequest request) {
++        return ResponseEntity.ok(productService.updateProduct(id, request));
++    }
++
+     @PostMapping("/{id}/units")
+     @PreAuthorize("hasRole('ADMIN')")
+     public ResponseEntity<Void> addUnit(@PathVariable Long id,
+@@ -71,6 +78,22 @@ public class ProductController {
+         return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).build();
+     }
+ 
++    /** Vue admin : toutes les unités de stock d'un produit, tous statuts confondus. */
++    @GetMapping("/{id}/units")
++    @PreAuthorize("hasRole('ADMIN')")
++    public ResponseEntity<java.util.List<com.ecommerce.catalogue.dto.ProductUnitDTO>> getUnits(@PathVariable Long id) {
++        return ResponseEntity.ok(productService.getUnits(id));
++    }
++
++    @PatchMapping("/{id}/units/{unitId}")
++    @PreAuthorize("hasRole('ADMIN')")
++    public ResponseEntity<com.ecommerce.catalogue.dto.ProductUnitDTO> updateUnitStatus(
++            @PathVariable Long id,
++            @PathVariable Long unitId,
++            @Valid @RequestBody com.ecommerce.catalogue.dto.UpdateUnitStatusRequest request) {
++        return ResponseEntity.ok(productService.updateUnitStatus(unitId, request.getStatus()));
++    }
++
+     /**
+      * Associe une photo à une couleur donnée pour ce produit (voir la note
+      * sur Product.colorImages) — utilisé par la fiche produit pour changer
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/dto/ProductUnitDTO.java b/backend/src/main/java/com/ecommerce/catalogue/dto/ProductUnitDTO.java
+new file mode 100644
+index 0000000..01bc582
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/catalogue/dto/ProductUnitDTO.java
+@@ -0,0 +1,24 @@
++package com.ecommerce.catalogue.dto;
++
++import com.ecommerce.common.enums.Grade;
++import com.ecommerce.common.enums.UnitStatus;
++import lombok.AllArgsConstructor;
++import lombok.Builder;
++import lombok.Getter;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++
++@Getter
++@Builder
++@AllArgsConstructor
++public class ProductUnitDTO {
++    private Long id;
++    private String serialNumber;
++    private Grade grade;
++    private String color;
++    private UnitStatus status;
++    private BigDecimal currentPrice;
++    private Instant enteredStockAt;
++    private Instant soldAt;
++}
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/dto/UpdateProductRequest.java b/backend/src/main/java/com/ecommerce/catalogue/dto/UpdateProductRequest.java
+new file mode 100644
+index 0000000..50d7045
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/catalogue/dto/UpdateProductRequest.java
+@@ -0,0 +1,21 @@
++package com.ecommerce.catalogue.dto;
++
++import jakarta.validation.constraints.NotBlank;
++import lombok.Getter;
++import lombok.Setter;
++
++@Getter
++@Setter
++public class UpdateProductRequest {
++
++    @NotBlank
++    private String name;
++
++    private String description;
++    private String brand;
++
++    @NotBlank
++    private String category;
++
++    private String imageUrl;
++}
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/dto/UpdateUnitStatusRequest.java b/backend/src/main/java/com/ecommerce/catalogue/dto/UpdateUnitStatusRequest.java
+new file mode 100644
+index 0000000..a3f8c88
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/catalogue/dto/UpdateUnitStatusRequest.java
+@@ -0,0 +1,14 @@
++package com.ecommerce.catalogue.dto;
++
++import com.ecommerce.common.enums.UnitStatus;
++import jakarta.validation.constraints.NotNull;
++import lombok.Getter;
++import lombok.Setter;
++
++@Getter
++@Setter
++public class UpdateUnitStatusRequest {
++
++    @NotNull
++    private UnitStatus status;
++}
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/repository/ProductUnitRepository.java b/backend/src/main/java/com/ecommerce/catalogue/repository/ProductUnitRepository.java
+index 5dafd07..edbd608 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/repository/ProductUnitRepository.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/repository/ProductUnitRepository.java
+@@ -24,6 +24,9 @@ public interface ProductUnitRepository extends JpaRepository<ProductUnit, Long>
+ 
+     List<ProductUnit> findByProductIdAndStatus(Long productId, UnitStatus status);
+ 
++    /** Toutes les unités d'un produit, tous statuts confondus — vue admin. */
++    List<ProductUnit> findByProductIdOrderByEnteredStockAtDesc(Long productId);
++
+     /**
+      * Sélectionne les N unités disponibles les plus anciennes (FIFO) pour un
+      * produit + grade + couleur donnés, avec verrou pessimiste pour éviter la
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java b/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
+index e0029d1..c3c5556 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/service/ProductService.java
+@@ -9,6 +9,7 @@ import com.ecommerce.common.enums.Grade;
+ import com.ecommerce.common.enums.UnitStatus;
+ import com.ecommerce.common.exception.ResourceNotFoundException;
+ import lombok.RequiredArgsConstructor;
++import org.springframework.cache.CacheManager;
+ import org.springframework.cache.annotation.CacheEvict;
+ import org.springframework.cache.annotation.Cacheable;
+ import org.springframework.data.domain.Page;
+@@ -23,6 +24,7 @@ public class ProductService {
+ 
+     private final ProductRepository productRepository;
+     private final ProductUnitRepository productUnitRepository;
++    private final CacheManager cacheManager;
+ 
+     /**
+      * Retourne PageResponse (DTO maison) plutôt que Page/PageImpl de Spring
+@@ -123,6 +125,33 @@ public class ProductService {
+         return toDTO(productRepository.save(product));
+     }
+ 
++    /**
++     * Contrairement à setColorImage (qui ne touche qu'une sous-donnée), une
++     * édition ici peut changer le nom/catégorie/image affichés partout
++     * (Boutique, home, fiche produit) → on évince les deux caches, pas
++     * seulement productVariants.
++     */
++    @CacheEvict(value = "products", allEntries = true)
++    public ProductDTO updateProduct(Long productId, UpdateProductRequest request) {
++        Product product = productRepository.findById(productId)
++                .orElseThrow(() -> new ResourceNotFoundException("Produit introuvable : " + productId));
++
++        product.setName(request.getName());
++        product.setDescription(request.getDescription());
++        product.setBrand(request.getBrand());
++        product.setCategory(request.getCategory());
++        product.setImageUrl(request.getImageUrl());
++
++        ProductDTO dto = toDTO(productRepository.save(product));
++        evictProductVariants(productId);
++        return dto;
++    }
++
++    private void evictProductVariants(Long productId) {
++        var cache = cacheManager.getCache("productVariants");
++        if (cache != null) cache.evict(productId);
++    }
++
+     @org.springframework.cache.annotation.CacheEvict(value = "productVariants", key = "#productId")
+     public void addUnit(Long productId, CreateProductUnitRequest request) {
+         Product product = productRepository.findById(productId)
+@@ -140,6 +169,47 @@ public class ProductService {
+         productUnitRepository.save(unit);
+     }
+ 
++    /** Vue admin : toutes les unités d'un produit, tous statuts. */
++    public List<ProductUnitDTO> getUnits(Long productId) {
++        return productUnitRepository.findByProductIdOrderByEnteredStockAtDesc(productId).stream()
++                .map(this::toUnitDTO)
++                .toList();
++    }
++
++    /**
++     * Changement de statut manuel (ex: marquer une unité DEFECTIVE suite à un
++     * contrôle qualité, ou la repasser AVAILABLE). Évince productVariants
++     * puisque ça affecte directement le stock affiché sur la fiche produit.
++     */
++    public ProductUnitDTO updateUnitStatus(Long unitId, UnitStatus status) {
++        var unit = productUnitRepository.findById(unitId)
++                .orElseThrow(() -> new ResourceNotFoundException("Unité introuvable : " + unitId));
++
++        unit.setStatus(status);
++        if (status == UnitStatus.SOLD && unit.getSoldAt() == null) {
++            unit.setSoldAt(java.time.Instant.now());
++        } else if (status == UnitStatus.AVAILABLE) {
++            unit.setSoldAt(null);
++        }
++        productUnitRepository.save(unit);
++
++        evictProductVariants(unit.getProduct().getId());
++        return toUnitDTO(unit);
++    }
++
++    private ProductUnitDTO toUnitDTO(com.ecommerce.catalogue.entity.ProductUnit unit) {
++        return ProductUnitDTO.builder()
++                .id(unit.getId())
++                .serialNumber(unit.getSerialNumber())
++                .grade(unit.getGrade())
++                .color(unit.getColor())
++                .status(unit.getStatus())
++                .currentPrice(unit.getCurrentPrice())
++                .enteredStockAt(unit.getEnteredStockAt())
++                .soldAt(unit.getSoldAt())
++                .build();
++    }
++
+     /**
+      * Définit/écrase la photo associée à une couleur pour ce produit.
+      * Évince le cache productVariants (la fiche détail sert ces images) —
+diff --git a/backend/src/main/java/com/ecommerce/commande/controller/AdminOrderController.java b/backend/src/main/java/com/ecommerce/commande/controller/AdminOrderController.java
+new file mode 100644
+index 0000000..3937d0b
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/commande/controller/AdminOrderController.java
+@@ -0,0 +1,33 @@
++package com.ecommerce.commande.controller;
++
++import com.ecommerce.commande.dto.AdminOrderDTO;
++import com.ecommerce.commande.dto.OrderDTO;
++import com.ecommerce.commande.dto.UpdateOrderStatusRequest;
++import com.ecommerce.commande.service.OrderService;
++import com.ecommerce.common.dto.PageResponse;
++import jakarta.validation.Valid;
++import lombok.RequiredArgsConstructor;
++import org.springframework.data.domain.Pageable;
++import org.springframework.http.ResponseEntity;
++import org.springframework.security.access.prepost.PreAuthorize;
++import org.springframework.web.bind.annotation.*;
++
++@RestController
++@RequestMapping("/api/admin/orders")
++@PreAuthorize("hasRole('ADMIN')")
++@RequiredArgsConstructor
++public class AdminOrderController {
++
++    private final OrderService orderService;
++
++    @GetMapping
++    public ResponseEntity<PageResponse<AdminOrderDTO>> getAllOrders(Pageable pageable) {
++        return ResponseEntity.ok(orderService.getAllOrders(pageable));
++    }
++
++    @PatchMapping("/{id}/status")
++    public ResponseEntity<OrderDTO> updateStatus(@PathVariable Long id,
++                                                  @Valid @RequestBody UpdateOrderStatusRequest request) {
++        return ResponseEntity.ok(orderService.updateStatus(id, request.getStatus()));
++    }
++}
+diff --git a/backend/src/main/java/com/ecommerce/commande/dto/AdminOrderDTO.java b/backend/src/main/java/com/ecommerce/commande/dto/AdminOrderDTO.java
+new file mode 100644
+index 0000000..7470751
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/commande/dto/AdminOrderDTO.java
+@@ -0,0 +1,22 @@
++package com.ecommerce.commande.dto;
++
++import com.ecommerce.common.enums.OrderStatus;
++import lombok.AllArgsConstructor;
++import lombok.Builder;
++import lombok.Getter;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++
++@Getter
++@Builder
++@AllArgsConstructor
++public class AdminOrderDTO {
++    private Long id;
++    private Long userId;
++    private String userEmail;
++    private OrderStatus status;
++    private BigDecimal total;
++    private int itemCount;
++    private Instant createdAt;
++}
+diff --git a/backend/src/main/java/com/ecommerce/commande/dto/UpdateOrderStatusRequest.java b/backend/src/main/java/com/ecommerce/commande/dto/UpdateOrderStatusRequest.java
+new file mode 100644
+index 0000000..6f7f413
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/commande/dto/UpdateOrderStatusRequest.java
+@@ -0,0 +1,14 @@
++package com.ecommerce.commande.dto;
++
++import com.ecommerce.common.enums.OrderStatus;
++import jakarta.validation.constraints.NotNull;
++import lombok.Getter;
++import lombok.Setter;
++
++@Getter
++@Setter
++public class UpdateOrderStatusRequest {
++
++    @NotNull
++    private OrderStatus status;
++}
+diff --git a/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java b/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java
+index cafba26..7764e1c 100644
+--- a/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java
++++ b/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java
+@@ -7,4 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
+ 
+ public interface OrderRepository extends JpaRepository<Order, Long> {
+     Page<Order> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
++
++    /** Vue admin : toutes les commandes, tous utilisateurs confondus. */
++    Page<Order> findAllByOrderByCreatedAtDesc(Pageable pageable);
+ }
+diff --git a/backend/src/main/java/com/ecommerce/commande/service/OrderService.java b/backend/src/main/java/com/ecommerce/commande/service/OrderService.java
+index eca6a12..4dd8f5c 100644
+--- a/backend/src/main/java/com/ecommerce/commande/service/OrderService.java
++++ b/backend/src/main/java/com/ecommerce/commande/service/OrderService.java
+@@ -1,6 +1,7 @@
+ package com.ecommerce.commande.service;
+ 
+ import com.ecommerce.auth.UserPrincipal;
++import com.ecommerce.auth.UserRepository;
+ import com.ecommerce.catalogue.entity.Product;
+ import com.ecommerce.catalogue.entity.ProductUnit;
+ import com.ecommerce.catalogue.repository.ProductRepository;
+@@ -21,6 +22,7 @@ import com.ecommerce.panier.repository.CartRepository;
+ import lombok.RequiredArgsConstructor;
+ import org.springframework.cache.Cache;
+ import org.springframework.cache.CacheManager;
++import org.springframework.data.domain.Page;
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.security.access.AccessDeniedException;
+ import org.springframework.stereotype.Service;
+@@ -31,6 +33,7 @@ import java.time.Instant;
+ import java.util.ArrayList;
+ import java.util.HashSet;
+ import java.util.List;
++import java.util.Map;
+ import java.util.Set;
+ 
+ @Service
+@@ -41,6 +44,7 @@ public class OrderService {
+     private final ProductRepository productRepository;
+     private final ProductUnitRepository productUnitRepository;
+     private final OrderRepository orderRepository;
++    private final UserRepository userRepository;
+     private final CacheManager cacheManager;
+ 
+     /**
+@@ -142,6 +146,75 @@ public class OrderService {
+                 orderRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable), this::toDTO);
+     }
+ 
++    /** Vue admin : toutes les commandes, tous utilisateurs confondus. */
++    public com.ecommerce.common.dto.PageResponse<com.ecommerce.commande.dto.AdminOrderDTO> getAllOrders(Pageable pageable) {
++        Page<Order> page = orderRepository.findAllByOrderByCreatedAtDesc(pageable);
++
++        Map<Long, String> emailsByUserId = userRepository.findAllById(
++                        page.getContent().stream().map(Order::getUserId).distinct().toList())
++                .stream()
++                .collect(java.util.stream.Collectors.toMap(com.ecommerce.auth.User::getId, com.ecommerce.auth.User::getEmail));
++
++        return com.ecommerce.common.dto.PageResponse.from(page, order -> com.ecommerce.commande.dto.AdminOrderDTO.builder()
++                .id(order.getId())
++                .userId(order.getUserId())
++                .userEmail(emailsByUserId.getOrDefault(order.getUserId(), "—"))
++                .status(order.getStatus())
++                .total(order.getTotal())
++                .itemCount(order.getItems().size())
++                .createdAt(order.getCreatedAt())
++                .build());
++    }
++
++    /**
++     * Transitions autorisées uniquement — évite qu'un admin ne remette par
++     * erreur une commande livrée en "en attente", par exemple. CANCELLED
++     * n'est atteignable que depuis PENDING/CONFIRMED (pas de retour en
++     * arrière après expédition, ça passerait par un retour produit, pas
++     * une simple annulation).
++     */
++    private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED_TRANSITIONS = Map.of(
++            OrderStatus.PENDING, Set.of(OrderStatus.CONFIRMED, OrderStatus.CANCELLED),
++            OrderStatus.CONFIRMED, Set.of(OrderStatus.SHIPPED, OrderStatus.CANCELLED),
++            OrderStatus.SHIPPED, Set.of(OrderStatus.DELIVERED),
++            OrderStatus.DELIVERED, Set.of(),
++            OrderStatus.CANCELLED, Set.of()
++    );
++
++    @Transactional
++    public OrderDTO updateStatus(Long orderId, OrderStatus newStatus) {
++        Order order = orderRepository.findById(orderId)
++                .orElseThrow(() -> new ResourceNotFoundException("Commande introuvable : " + orderId));
++
++        OrderStatus current = order.getStatus();
++        if (current == newStatus) {
++            return toDTO(order);
++        }
++        if (!ALLOWED_TRANSITIONS.getOrDefault(current, Set.of()).contains(newStatus)) {
++            throw new ConflictException("Transition invalide : " + current + " → " + newStatus);
++        }
++
++        // Une annulation remet les unités vendues en stock disponible — sans
++        // ça, l'annulation "perdrait" ces unités : elles resteraient SOLD
++        // pour toujours alors qu'aucune vente n'a réellement abouti.
++        if (newStatus == OrderStatus.CANCELLED) {
++            for (OrderItem item : order.getItems()) {
++                productUnitRepository.findById(item.getProductUnitId()).ifPresent(unit -> {
++                    unit.setStatus(UnitStatus.AVAILABLE);
++                    unit.setSoldAt(null);
++                    productUnitRepository.save(unit);
++                });
++            }
++            Set<Long> affectedProductIds = order.getItems().stream()
++                    .map(OrderItem::getProductId)
++                    .collect(java.util.stream.Collectors.toSet());
++            evictProductVariantsCache(affectedProductIds);
++        }
++
++        order.setStatus(newStatus);
++        return toDTO(orderRepository.save(order));
++    }
++
+     /**
+      * Empêche un utilisateur de consulter la commande / l'historique d'un
+      * autre utilisateur simplement en changeant l'id dans l'URL (faille IDOR).
+diff --git a/frontend/src/api/orderApi.js b/frontend/src/api/orderApi.js
+index 89460cf..bc5d874 100644
+--- a/frontend/src/api/orderApi.js
++++ b/frontend/src/api/orderApi.js
+@@ -5,4 +5,11 @@ export const orderApi = {
+   getById: (id) => axiosInstance.get(`/orders/${id}`).then((r) => r.data),
+   getForUser: (userId, { page = 0, size = 10 } = {}) =>
+     axiosInstance.get(`/orders/user/${userId}`, { params: { page, size } }).then((r) => r.data),
++
++  // Vue admin : toutes les commandes, tous utilisateurs confondus.
++  adminGetAll: ({ page = 0, size = 20 } = {}) =>
++    axiosInstance.get('/admin/orders', { params: { page, size } }).then((r) => r.data),
++
++  adminUpdateStatus: (orderId, status) =>
++    axiosInstance.patch(`/admin/orders/${orderId}/status`, { status }).then((r) => r.data),
+ }
+diff --git a/frontend/src/api/productApi.js b/frontend/src/api/productApi.js
+index efeb6ea..c31dbc8 100644
+--- a/frontend/src/api/productApi.js
++++ b/frontend/src/api/productApi.js
+@@ -27,6 +27,16 @@ export const productApi = {
+ 
+   create: (data) => axiosInstance.post('/products', data).then((r) => r.data),
+ 
++  update: (id, data) => axiosInstance.patch(`/products/${id}`, data).then((r) => r.data),
++
+   addUnit: (productId, data) =>
+     axiosInstance.post(`/products/${productId}/units`, data).then((r) => r.data),
++
++  getUnits: (productId) => axiosInstance.get(`/products/${productId}/units`).then((r) => r.data),
++
++  updateUnitStatus: (productId, unitId, status) =>
++    axiosInstance.patch(`/products/${productId}/units/${unitId}`, { status }).then((r) => r.data),
++
++  setColorImage: (productId, color, imageUrl) =>
++    axiosInstance.put(`/products/${productId}/color-images`, { color, imageUrl }).then((r) => r.data),
+ }
+diff --git a/frontend/src/components/admin/AdminProductList.jsx b/frontend/src/components/admin/AdminProductList.jsx
+new file mode 100644
+index 0000000..baffe8d
+--- /dev/null
++++ b/frontend/src/components/admin/AdminProductList.jsx
+@@ -0,0 +1,37 @@
++import { Plus } from 'lucide-react'
++
++export default function AdminProductList({ products, selectedId, onSelect, onNew }) {
++  return (
++    <div className="w-64 shrink-0 border-r border-line">
++      <button
++        onClick={onNew}
++        className={`flex w-full items-center gap-2 border-b border-line px-4 py-3 text-left text-sm font-medium transition hover:bg-surface-muted ${
++          selectedId === null ? 'bg-surface-muted text-ink' : 'text-ink-soft'
++        }`}
++      >
++        <Plus size={15} />
++        Nouveau produit
++      </button>
++
++      <div className="max-h-[70vh] overflow-y-auto">
++        {products.map((p) => (
++          <button
++            key={p.id}
++            onClick={() => onSelect(p.id)}
++            className={`flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left transition hover:bg-surface-muted ${
++              selectedId === p.id ? 'bg-surface-muted' : ''
++            }`}
++          >
++            <div className="h-10 w-10 shrink-0 overflow-hidden border border-line bg-surface-muted">
++              {p.imageUrl && <img src={p.imageUrl} alt="" className="h-full w-full object-cover" />}
++            </div>
++            <div className="min-w-0">
++              <p className="truncate text-sm text-ink">{p.name}</p>
++              <p className="truncate text-xs text-ink-soft">{p.brand}</p>
++            </div>
++          </button>
++        ))}
++      </div>
++    </div>
++  )
++}
+diff --git a/frontend/src/components/admin/AdminSidebar.jsx b/frontend/src/components/admin/AdminSidebar.jsx
+index ee4eebc..9200c2d 100644
+--- a/frontend/src/components/admin/AdminSidebar.jsx
++++ b/frontend/src/components/admin/AdminSidebar.jsx
+@@ -1,26 +1,30 @@
+-import { NavLink } from 'react-router-dom'
++import { NavLink, Link } from 'react-router-dom'
++import { ArrowLeft } from 'lucide-react'
+ 
+-const links = [
+-  { to: '/admin', label: 'Vue d\u2019ensemble', end: true },
+-  { to: '/admin/products', label: 'Produits & stock' },
+-  { to: '/admin/pricing', label: 'Historique pricing' },
++const LINKS = [
++  { to: '/admin', label: 'Tableau de bord', end: true },
++  { to: '/admin/products', label: 'Produits' },
++  { to: '/admin/orders', label: 'Commandes' },
++  { to: '/admin/pricing', label: 'Historique des prix' },
+ ]
+ 
+ export default function AdminSidebar() {
+   return (
+-    <aside className="w-56 shrink-0 border-r border-surface-sunken bg-ink px-4 py-8">
+-      <div className="mb-8 px-2 font-display text-sm font-semibold text-white/90">
+-        Panneau admin
+-      </div>
+-      <nav className="flex flex-col gap-1">
+-        {links.map((link) => (
++    <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-surface px-5 py-8">
++      <Link to="/" className="font-display text-lg font-medium text-ink">
++        NewDev <span className="italic text-brand-500">Shop</span>
++      </Link>
++      <p className="eyebrow mt-1">Administration</p>
++
++      <nav className="mt-8 flex flex-col gap-1">
++        {LINKS.map((link) => (
+           <NavLink
+             key={link.to}
+             to={link.to}
+             end={link.end}
+             className={({ isActive }) =>
+-              `rounded-md px-3 py-2 text-sm transition ${
+-                isActive ? 'bg-brand-600 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white'
++              `px-3 py-2 text-sm transition ${
++                isActive ? 'bg-surface-muted text-ink' : 'text-ink-soft hover:text-ink'
+               }`
+             }
+           >
+@@ -28,6 +32,14 @@ export default function AdminSidebar() {
+           </NavLink>
+         ))}
+       </nav>
++
++      <Link
++        to="/"
++        className="mt-auto flex items-center gap-1.5 pt-8 text-xs text-ink-soft transition hover:text-ink"
++      >
++        <ArrowLeft size={13} />
++        Retour à la boutique
++      </Link>
+     </aside>
+   )
+ }
+diff --git a/frontend/src/components/admin/ColorImagesManager.jsx b/frontend/src/components/admin/ColorImagesManager.jsx
+new file mode 100644
+index 0000000..108d875
+--- /dev/null
++++ b/frontend/src/components/admin/ColorImagesManager.jsx
+@@ -0,0 +1,79 @@
++import { useState } from 'react'
++import toast from 'react-hot-toast'
++import { useSetColorImage } from '../../hooks/useAdmin'
++
++export default function ColorImagesManager({ productId, colorImages }) {
++  const [color, setColor] = useState('')
++  const [imageUrl, setImageUrl] = useState('')
++  const setColorImage = useSetColorImage()
++
++  const entries = Object.entries(colorImages || {})
++
++  const handleSubmit = (e) => {
++    e.preventDefault()
++    setColorImage.mutate(
++      { productId, color, imageUrl },
++      {
++        onSuccess: () => {
++          toast.success(`Image enregistrée pour « ${color} »`)
++          setColor('')
++          setImageUrl('')
++        },
++        onError: (err) => toast.error(err.response?.data?.message || 'Échec de l’enregistrement'),
++      }
++    )
++  }
++
++  return (
++    <div className="border border-line bg-surface p-6">
++      <p className="eyebrow">Photos par couleur</p>
++      <p className="mt-1.5 text-xs leading-relaxed text-ink-soft">
++        Le grade n’affecte pas la photo, seule la couleur compte. Une couleur sans photo ici
++        retombe sur l’image par défaut du produit.
++      </p>
++
++      {entries.length > 0 && (
++        <div className="mt-5 grid grid-cols-3 gap-3 sm:grid-cols-4">
++          {entries.map(([c, url]) => (
++            <div key={c} className="flex flex-col gap-1.5">
++              <div className="aspect-square overflow-hidden border border-line bg-surface-muted">
++                <img src={url} alt={c} className="h-full w-full object-cover" />
++              </div>
++              <span className="truncate text-xs text-ink-soft">{c}</span>
++            </div>
++          ))}
++        </div>
++      )}
++
++      <form onSubmit={handleSubmit} className="mt-5 flex flex-wrap items-end gap-3">
++        <div className="flex flex-col gap-1.5">
++          <label className="text-xs text-ink-soft">Couleur</label>
++          <input
++            required
++            value={color}
++            onChange={(e) => setColor(e.target.value)}
++            placeholder="ex. Bleu"
++            className="w-32 border border-line bg-transparent px-3 py-2 text-sm text-ink outline-none focus:border-ink"
++          />
++        </div>
++        <div className="flex flex-1 flex-col gap-1.5">
++          <label className="text-xs text-ink-soft">URL de l’image</label>
++          <input
++            required
++            value={imageUrl}
++            onChange={(e) => setImageUrl(e.target.value)}
++            placeholder="https://…"
++            className="w-full border border-line bg-transparent px-3 py-2 text-sm text-ink outline-none focus:border-ink"
++          />
++        </div>
++        <button
++          type="submit"
++          disabled={setColorImage.isPending}
++          className="rounded-full bg-ink px-5 py-2 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-40"
++        >
++          {setColorImage.isPending ? 'Enregistrement…' : 'Enregistrer'}
++        </button>
++      </form>
++    </div>
++  )
++}
+diff --git a/frontend/src/components/admin/DateRangePicker.jsx b/frontend/src/components/admin/DateRangePicker.jsx
+index 330df0f..47660a7 100644
+--- a/frontend/src/components/admin/DateRangePicker.jsx
++++ b/frontend/src/components/admin/DateRangePicker.jsx
+@@ -7,7 +7,7 @@ export default function DateRangePicker({ from, to, onChange }) {
+           type="date"
+           value={from}
+           onChange={(e) => onChange({ from: e.target.value, to })}
+-          className="rounded-md border border-surface-sunken px-2 py-1 font-mono text-xs"
++          className="border border-line px-2 py-1 font-mono text-xs text-ink outline-none focus:border-ink"
+         />
+       </label>
+       <label className="flex items-center gap-2 text-ink-soft">
+@@ -16,7 +16,7 @@ export default function DateRangePicker({ from, to, onChange }) {
+           type="date"
+           value={to}
+           onChange={(e) => onChange({ from, to: e.target.value })}
+-          className="rounded-md border border-surface-sunken px-2 py-1 font-mono text-xs"
++          className="border border-line px-2 py-1 font-mono text-xs text-ink outline-none focus:border-ink"
+         />
+       </label>
+     </div>
+diff --git a/frontend/src/components/admin/KpiCard.jsx b/frontend/src/components/admin/KpiCard.jsx
+index ee18a8a..249cc1f 100644
+--- a/frontend/src/components/admin/KpiCard.jsx
++++ b/frontend/src/components/admin/KpiCard.jsx
+@@ -6,9 +6,9 @@ export default function KpiCard({ label, value, accent = 'ink' }) {
+   }
+ 
+   return (
+-    <div className="rounded-xl border border-surface-sunken bg-surface p-5">
+-      <div className="text-xs uppercase tracking-wide text-ink-soft">{label}</div>
+-      <div className={`tabular-price mt-2 text-2xl font-semibold ${accentClasses[accent]}`}>{value}</div>
++    <div className="border border-line bg-surface p-5">
++      <div className="eyebrow">{label}</div>
++      <div className={`tabular-price mt-3 font-display text-2xl font-medium ${accentClasses[accent]}`}>{value}</div>
+     </div>
+   )
+ }
+diff --git a/frontend/src/components/admin/OrderStatusSelect.jsx b/frontend/src/components/admin/OrderStatusSelect.jsx
+new file mode 100644
+index 0000000..24f5742
+--- /dev/null
++++ b/frontend/src/components/admin/OrderStatusSelect.jsx
+@@ -0,0 +1,22 @@
++import { ORDER_STATUS, ORDER_STATUS_TRANSITIONS } from '../../constants/orderStatus'
++
++export default function OrderStatusSelect({ status, onChange, disabled }) {
++  const options = [status, ...(ORDER_STATUS_TRANSITIONS[status] || [])]
++
++  return (
++    <select
++      value={status}
++      disabled={disabled}
++      onChange={(e) => onChange(e.target.value)}
++      className={`border border-line bg-surface px-2.5 py-1 text-xs font-medium uppercase tracking-wide outline-none transition focus:border-ink disabled:opacity-50 ${
++        ORDER_STATUS[status]?.className || 'text-ink-soft'
++      }`}
++    >
++      {options.map((code) => (
++        <option key={code} value={code}>
++          {ORDER_STATUS[code]?.label || code}
++        </option>
++      ))}
++    </select>
++  )
++}
+diff --git a/frontend/src/components/admin/PriceHistoryTable.jsx b/frontend/src/components/admin/PriceHistoryTable.jsx
+index 2d990de..ea6c156 100644
+--- a/frontend/src/components/admin/PriceHistoryTable.jsx
++++ b/frontend/src/components/admin/PriceHistoryTable.jsx
+@@ -8,10 +8,10 @@ export default function PriceHistoryTable({ entries }) {
+   }
+ 
+   return (
+-    <div className="overflow-x-auto rounded-xl border border-surface-sunken bg-surface">
++    <div className="overflow-x-auto border border-line bg-surface">
+       <table className="w-full text-sm">
+         <thead>
+-          <tr className="border-b border-surface-sunken text-left text-xs uppercase tracking-wide text-ink-soft">
++          <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-soft">
+             <th className="px-4 py-3">Produit</th>
+             <th className="px-4 py-3">Grade</th>
+             <th className="px-4 py-3">Ancien prix</th>
+@@ -23,7 +23,7 @@ export default function PriceHistoryTable({ entries }) {
+         </thead>
+         <tbody>
+           {entries.map((e) => (
+-            <tr key={e.id} className="border-b border-surface-sunken last:border-0">
++            <tr key={e.id} className="border-b border-line last:border-0">
+               <td className="px-4 py-3 font-medium text-ink">{e.productName || `#${e.productId}`}</td>
+               <td className="px-4 py-3 font-mono text-xs">{e.grade}</td>
+               <td className="px-4 py-3 tabular-price text-ink-soft">{formatCurrency(e.oldPrice)}</td>
+diff --git a/frontend/src/components/admin/ProductEditForm.jsx b/frontend/src/components/admin/ProductEditForm.jsx
+new file mode 100644
+index 0000000..095894b
+--- /dev/null
++++ b/frontend/src/components/admin/ProductEditForm.jsx
+@@ -0,0 +1,122 @@
++import { useState, useEffect } from 'react'
++import toast from 'react-hot-toast'
++import { CATEGORIES } from '../../constants/catalogue'
++import { useCreateProduct, useUpdateProduct } from '../../hooks/useAdmin'
++
++const EMPTY = { name: '', description: '', brand: '', category: CATEGORIES[0].id, imageUrl: '' }
++
++export default function ProductEditForm({ product, onCreated }) {
++  const isEditing = !!product
++  const [form, setForm] = useState(EMPTY)
++  const createProduct = useCreateProduct()
++  const updateProduct = useUpdateProduct()
++
++  useEffect(() => {
++    setForm(
++      product
++        ? {
++            name: product.name || '',
++            description: product.description || '',
++            brand: product.brand || '',
++            category: product.category || CATEGORIES[0].id,
++            imageUrl: product.imageUrl || '',
++          }
++        : EMPTY
++    )
++  }, [product])
++
++  const inputClass =
++    'border border-line bg-transparent px-3 py-2.5 text-sm text-ink outline-none transition placeholder:text-ink-soft focus:border-ink'
++
++  const handleSubmit = (e) => {
++    e.preventDefault()
++    if (isEditing) {
++      updateProduct.mutate(
++        { id: product.id, data: form },
++        {
++          onSuccess: () => toast.success('Produit mis à jour'),
++          onError: (err) => toast.error(err.response?.data?.message || 'Échec de la mise à jour'),
++        }
++      )
++    } else {
++      createProduct.mutate(form, {
++        onSuccess: (created) => {
++          toast.success('Produit créé')
++          setForm(EMPTY)
++          onCreated?.(created)
++        },
++        onError: (err) => toast.error(err.response?.data?.message || 'Échec de la création'),
++      })
++    }
++  }
++
++  const isPending = createProduct.isPending || updateProduct.isPending
++
++  return (
++    <form onSubmit={handleSubmit} className="flex flex-col gap-4 border border-line bg-surface p-6">
++      <p className="eyebrow">{isEditing ? 'Modifier le produit' : 'Nouveau produit'}</p>
++
++      <div className="grid gap-4 sm:grid-cols-2">
++        <div className="flex flex-col gap-1.5">
++          <label className="text-xs text-ink-soft">Nom</label>
++          <input
++            required
++            value={form.name}
++            onChange={(e) => setForm({ ...form, name: e.target.value })}
++            className={inputClass}
++          />
++        </div>
++        <div className="flex flex-col gap-1.5">
++          <label className="text-xs text-ink-soft">Marque</label>
++          <input
++            value={form.brand}
++            onChange={(e) => setForm({ ...form, brand: e.target.value })}
++            className={inputClass}
++          />
++        </div>
++      </div>
++
++      <div className="flex flex-col gap-1.5">
++        <label className="text-xs text-ink-soft">Description</label>
++        <textarea
++          rows={3}
++          value={form.description}
++          onChange={(e) => setForm({ ...form, description: e.target.value })}
++          className={inputClass}
++        />
++      </div>
++
++      <div className="grid gap-4 sm:grid-cols-2">
++        <div className="flex flex-col gap-1.5">
++          <label className="text-xs text-ink-soft">Catégorie</label>
++          <select
++            value={form.category}
++            onChange={(e) => setForm({ ...form, category: e.target.value })}
++            className={inputClass}
++          >
++            {CATEGORIES.map((c) => (
++              <option key={c.id} value={c.id}>{c.label}</option>
++            ))}
++          </select>
++        </div>
++        <div className="flex flex-col gap-1.5">
++          <label className="text-xs text-ink-soft">Image par défaut (URL)</label>
++          <input
++            value={form.imageUrl}
++            onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
++            placeholder="https://…"
++            className={inputClass}
++          />
++        </div>
++      </div>
++
++      <button
++        type="submit"
++        disabled={isPending}
++        className="mt-2 self-start rounded-full bg-ink px-6 py-2.5 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-40"
++      >
++        {isPending ? 'Enregistrement…' : isEditing ? 'Enregistrer' : 'Créer le produit'}
++      </button>
++    </form>
++  )
++}
+diff --git a/frontend/src/components/admin/ProductForm.jsx b/frontend/src/components/admin/ProductForm.jsx
+deleted file mode 100644
+index 3097c2c..0000000
+--- a/frontend/src/components/admin/ProductForm.jsx
++++ /dev/null
+@@ -1,73 +0,0 @@
+-import { useState } from 'react'
+-import { useMutation, useQueryClient } from '@tanstack/react-query'
+-import toast from 'react-hot-toast'
+-import { productApi } from '../../api/productApi'
+-
+-const EMPTY_FORM = { name: '', description: '', brand: '', category: 'electronics', imageUrl: '' }
+-
+-export default function ProductForm({ onCreated }) {
+-  const [form, setForm] = useState(EMPTY_FORM)
+-  const queryClient = useQueryClient()
+-
+-  const mutation = useMutation({
+-    mutationFn: productApi.create,
+-    onSuccess: (product) => {
+-      toast.success('Produit créé')
+-      queryClient.invalidateQueries({ queryKey: ['products'] })
+-      setForm(EMPTY_FORM)
+-      onCreated?.(product)
+-    },
+-    onError: (err) => toast.error(err.response?.data?.message || 'Échec de la création'),
+-  })
+-
+-  const handleSubmit = (e) => {
+-    e.preventDefault()
+-    mutation.mutate(form)
+-  }
+-
+-  return (
+-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-xl border border-surface-sunken bg-surface p-5">
+-      <h3 className="font-display text-sm font-semibold">Nouveau produit</h3>
+-      <input
+-        required
+-        placeholder="Nom (ex: iPhone 13 128GB)"
+-        value={form.name}
+-        onChange={(e) => setForm({ ...form, name: e.target.value })}
+-        className="rounded-md border border-surface-sunken px-3 py-2 text-sm"
+-      />
+-      <input
+-        placeholder="Marque"
+-        value={form.brand}
+-        onChange={(e) => setForm({ ...form, brand: e.target.value })}
+-        className="rounded-md border border-surface-sunken px-3 py-2 text-sm"
+-      />
+-      <input
+-        required
+-        placeholder="Catégorie"
+-        value={form.category}
+-        onChange={(e) => setForm({ ...form, category: e.target.value })}
+-        className="rounded-md border border-surface-sunken px-3 py-2 text-sm"
+-      />
+-      <textarea
+-        placeholder="Description"
+-        value={form.description}
+-        onChange={(e) => setForm({ ...form, description: e.target.value })}
+-        rows={3}
+-        className="rounded-md border border-surface-sunken px-3 py-2 text-sm"
+-      />
+-      <input
+-        placeholder="URL image (optionnel)"
+-        value={form.imageUrl}
+-        onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
+-        className="rounded-md border border-surface-sunken px-3 py-2 text-sm"
+-      />
+-      <button
+-        type="submit"
+-        disabled={mutation.isPending}
+-        className="mt-1 rounded-md bg-ink py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-40"
+-      >
+-        {mutation.isPending ? 'Création…' : 'Créer le produit'}
+-      </button>
+-    </form>
+-  )
+-}
+diff --git a/frontend/src/components/admin/ProductUnitForm.jsx b/frontend/src/components/admin/ProductUnitForm.jsx
+index 03fe7d9..c67831a 100644
+--- a/frontend/src/components/admin/ProductUnitForm.jsx
++++ b/frontend/src/components/admin/ProductUnitForm.jsx
+@@ -1,80 +1,82 @@
+ import { useState } from 'react'
+-import { useMutation, useQueryClient } from '@tanstack/react-query'
+ import toast from 'react-hot-toast'
+-import { productApi } from '../../api/productApi'
++import { GRADES } from '../../constants/catalogue'
++import { useAddUnit } from '../../hooks/useAdmin'
+ 
+-const GRADES = ['NEUF', 'A', 'B', 'C']
+-const EMPTY_FORM = { serialNumber: '', grade: 'A', color: '', currentPrice: '' }
++const EMPTY = { serialNumber: '', grade: 'NEUF', color: '', currentPrice: '' }
+ 
+ export default function ProductUnitForm({ productId }) {
+-  const [form, setForm] = useState(EMPTY_FORM)
+-  const queryClient = useQueryClient()
++  const [form, setForm] = useState(EMPTY)
++  const addUnit = useAddUnit()
+ 
+-  const mutation = useMutation({
+-    mutationFn: (data) => productApi.addUnit(productId, data),
+-    onSuccess: () => {
+-      toast.success('Unité ajoutée')
+-      queryClient.invalidateQueries({ queryKey: ['product', productId] })
+-      setForm(EMPTY_FORM)
+-    },
+-    onError: (err) => toast.error(err.response?.data?.message || "Échec de l'ajout"),
+-  })
++  const inputClass =
++    'border border-line bg-transparent px-3 py-2 text-sm text-ink outline-none transition placeholder:text-ink-soft focus:border-ink'
+ 
+   const handleSubmit = (e) => {
+     e.preventDefault()
+-    mutation.mutate({ ...form, currentPrice: Number(form.currentPrice) })
+-  }
+-
+-  if (!productId) {
+-    return <p className="text-xs text-ink-soft">Sélectionne un produit pour lui ajouter des unités.</p>
++    addUnit.mutate(
++      { productId, data: { ...form, currentPrice: parseFloat(form.currentPrice) } },
++      {
++        onSuccess: () => {
++          toast.success('Unité ajoutée')
++          setForm(EMPTY)
++        },
++        onError: (err) => toast.error(err.response?.data?.message || 'Échec de l’ajout'),
++      }
++    )
+   }
+ 
+   return (
+-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-xl border border-surface-sunken bg-surface p-5">
+-      <h3 className="font-display text-sm font-semibold">
+-        Ajouter une unité — produit #{productId}
+-      </h3>
+-      <input
+-        required
+-        placeholder="Numéro de série"
+-        value={form.serialNumber}
+-        onChange={(e) => setForm({ ...form, serialNumber: e.target.value })}
+-        className="rounded-md border border-surface-sunken px-3 py-2 font-mono text-sm"
+-      />
+-      <select
+-        value={form.grade}
+-        onChange={(e) => setForm({ ...form, grade: e.target.value })}
+-        className="rounded-md border border-surface-sunken px-3 py-2 text-sm"
+-      >
+-        {GRADES.map((g) => (
+-          <option key={g} value={g}>
+-            {g}
+-          </option>
+-        ))}
+-      </select>
+-      <input
+-        required
+-        placeholder="Couleur (ex: Noir, Bleu…)"
+-        value={form.color}
+-        onChange={(e) => setForm({ ...form, color: e.target.value })}
+-        className="rounded-md border border-surface-sunken px-3 py-2 text-sm"
+-      />
+-      <input
+-        required
+-        type="number"
+-        step="0.01"
+-        min="0.01"
+-        placeholder="Prix courant"
+-        value={form.currentPrice}
+-        onChange={(e) => setForm({ ...form, currentPrice: e.target.value })}
+-        className="rounded-md border border-surface-sunken px-3 py-2 font-mono text-sm"
+-      />
++    <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3 border-t border-line pt-5">
++      <div className="flex flex-col gap-1.5">
++        <label className="text-xs text-ink-soft">N° de série</label>
++        <input
++          required
++          value={form.serialNumber}
++          onChange={(e) => setForm({ ...form, serialNumber: e.target.value })}
++          className={`w-36 ${inputClass}`}
++        />
++      </div>
++      <div className="flex flex-col gap-1.5">
++        <label className="text-xs text-ink-soft">Grade</label>
++        <select
++          value={form.grade}
++          onChange={(e) => setForm({ ...form, grade: e.target.value })}
++          className={inputClass}
++        >
++          {GRADES.map((g) => (
++            <option key={g.code} value={g.code}>{g.code}</option>
++          ))}
++        </select>
++      </div>
++      <div className="flex flex-col gap-1.5">
++        <label className="text-xs text-ink-soft">Couleur</label>
++        <input
++          required
++          value={form.color}
++          onChange={(e) => setForm({ ...form, color: e.target.value })}
++          placeholder="ex. Bleu"
++          className={`w-28 ${inputClass}`}
++        />
++      </div>
++      <div className="flex flex-col gap-1.5">
++        <label className="text-xs text-ink-soft">Prix</label>
++        <input
++          required
++          type="number"
++          step="0.01"
++          min="0.01"
++          value={form.currentPrice}
++          onChange={(e) => setForm({ ...form, currentPrice: e.target.value })}
++          className={`w-28 ${inputClass}`}
++        />
++      </div>
+       <button
+         type="submit"
+-        disabled={mutation.isPending}
+-        className="mt-1 rounded-md bg-ink py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-40"
++        disabled={addUnit.isPending}
++        className="rounded-full bg-ink px-5 py-2 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-40"
+       >
+-        {mutation.isPending ? 'Ajout…' : 'Ajouter l\u2019unité'}
++        {addUnit.isPending ? 'Ajout…' : '+ Ajouter une unité'}
+       </button>
+     </form>
+   )
+diff --git a/frontend/src/components/admin/ProductUnitsPanel.jsx b/frontend/src/components/admin/ProductUnitsPanel.jsx
+new file mode 100644
+index 0000000..39103aa
+--- /dev/null
++++ b/frontend/src/components/admin/ProductUnitsPanel.jsx
+@@ -0,0 +1,72 @@
++import toast from 'react-hot-toast'
++import { UNIT_STATUS } from '../../constants/catalogue'
++import { useProductUnits, useUpdateUnitStatus } from '../../hooks/useAdmin'
++import { formatDate } from '../../utils/formatDate'
++import PriceTag from '../common/PriceTag'
++import LoadingSpinner from '../common/LoadingSpinner'
++import ProductUnitForm from './ProductUnitForm'
++
++const ALL_STATUSES = Object.keys(UNIT_STATUS)
++
++export default function ProductUnitsPanel({ productId }) {
++  const { data: units, isLoading } = useProductUnits(productId)
++  const updateStatus = useUpdateUnitStatus()
++
++  const handleStatusChange = (unitId, status) => {
++    updateStatus.mutate(
++      { productId, unitId, status },
++      { onError: (err) => toast.error(err.response?.data?.message || 'Échec de la mise à jour') }
++    )
++  }
++
++  return (
++    <div className="border border-line bg-surface p-6">
++      <p className="eyebrow">Stock ({units?.length ?? 0} unité{(units?.length ?? 0) > 1 ? 's' : ''})</p>
++
++      {isLoading ? (
++        <div className="mt-4"><LoadingSpinner label="Chargement du stock…" /></div>
++      ) : units?.length === 0 ? (
++        <p className="mt-4 text-sm text-ink-soft">Aucune unité en stock pour ce produit.</p>
++      ) : (
++        <div className="mt-4">
++          <div className="grid grid-cols-[1fr_60px_100px_90px_100px_140px] gap-3 border-b border-line pb-2 text-xs font-medium uppercase tracking-wide text-ink-soft">
++            <span>N° de série</span>
++            <span>Grade</span>
++            <span>Couleur</span>
++            <span>Prix</span>
++            <span>Entrée</span>
++            <span>Statut</span>
++          </div>
++          {units?.map((unit) => (
++            <div
++              key={unit.id}
++              className="grid grid-cols-[1fr_60px_100px_90px_100px_140px] items-center gap-3 border-b border-line py-2.5 text-sm last:border-b-0"
++            >
++              <span className="truncate font-mono text-xs text-ink">{unit.serialNumber}</span>
++              <span className="font-mono text-xs text-ink-soft">{unit.grade}</span>
++              <span className="truncate text-ink-soft">{unit.color}</span>
++              <PriceTag price={unit.currentPrice} size="sm" />
++              <span className="text-xs text-ink-soft">{formatDate(unit.enteredStockAt)}</span>
++              <select
++                value={unit.status}
++                disabled={updateStatus.isPending}
++                onChange={(e) => handleStatusChange(unit.id, e.target.value)}
++                className={`border border-line bg-surface px-2 py-1 text-xs font-medium uppercase tracking-wide outline-none transition focus:border-ink disabled:opacity-50 ${
++                  UNIT_STATUS[unit.status]?.className || 'text-ink-soft'
++                }`}
++              >
++                {ALL_STATUSES.map((s) => (
++                  <option key={s} value={s}>{UNIT_STATUS[s].label}</option>
++                ))}
++              </select>
++            </div>
++          ))}
++        </div>
++      )}
++
++      <div className="mt-5">
++        <ProductUnitForm productId={productId} />
++      </div>
++    </div>
++  )
++}
+diff --git a/frontend/src/components/admin/RevenueImpactChart.jsx b/frontend/src/components/admin/RevenueImpactChart.jsx
+index 3affc68..9cff7cd 100644
+--- a/frontend/src/components/admin/RevenueImpactChart.jsx
++++ b/frontend/src/components/admin/RevenueImpactChart.jsx
+@@ -41,21 +41,21 @@ export default function RevenueImpactChart({ historyEntries }) {
+ 
+   if (data.length === 0) {
+     return (
+-      <div className="flex h-72 items-center justify-center rounded-xl border border-surface-sunken bg-surface text-sm text-ink-soft">
++      <div className="flex h-72 items-center justify-center border border-line bg-surface text-sm text-ink-soft">
+         Pas encore assez d’ajustements pour tracer une tendance.
+       </div>
+     )
+   }
+ 
+   return (
+-    <div className="rounded-xl border border-surface-sunken bg-surface p-5">
+-      <h3 className="mb-1 font-display text-sm font-semibold">Impact revenu cumulé — dynamique vs statique</h3>
++    <div className="border border-line bg-surface p-5">
++      <h3 className="mb-1 font-display text-base font-medium text-ink">Impact revenu cumulé — dynamique vs statique</h3>
+       <p className="mb-4 text-xs text-ink-soft">
+         Le scénario statique correspond à une absence d’ajustement de prix (référence à 0).
+       </p>
+       <ResponsiveContainer width="100%" height={280}>
+         <LineChart data={data}>
+-          <CartesianGrid strokeDasharray="3 3" stroke="#EEF0EC" />
++          <CartesianGrid strokeDasharray="3 3" stroke="#E4E2DB" />
+           <XAxis
+             dataKey="date"
+             tickFormatter={(d) => formatDate(d).split(' ').slice(0, 2).join(' ')}
+@@ -71,12 +71,12 @@ export default function RevenueImpactChart({ historyEntries }) {
+             labelFormatter={(d) => formatDate(d)}
+           />
+           <Legend />
+-          <ReferenceLine y={0} stroke="#78716C" strokeDasharray="4 4" label="Statique" />
++          <ReferenceLine y={0} stroke="#6E6E6B" strokeDasharray="4 4" label="Statique" />
+           <Line
+             type="monotone"
+             dataKey="dynamique"
+             name="Dynamique (cumulé)"
+-            stroke="#0F766E"
++            stroke="#1D4ED8"
+             strokeWidth={2}
+             dot={false}
+           />
+diff --git a/frontend/src/constants/catalogue.js b/frontend/src/constants/catalogue.js
+index cf793f0..bd9d8ca 100644
+--- a/frontend/src/constants/catalogue.js
++++ b/frontend/src/constants/catalogue.js
+@@ -5,6 +5,13 @@ export const CATEGORIES = [
+   { id: 'electronics', label: 'Électronique' },
+ ]
+ 
++export const UNIT_STATUS = {
++  AVAILABLE: { label: 'Disponible', className: 'text-deal-down' },
++  SOLD: { label: 'Vendue', className: 'text-ink-soft' },
++  RETURNED: { label: 'Retournée', className: 'text-brand-600' },
++  DEFECTIVE: { label: 'Défectueuse', className: 'text-deal-up' },
++}
++
+ export const GRADES = [
+   {
+     code: 'NEUF',
+diff --git a/frontend/src/constants/orderStatus.js b/frontend/src/constants/orderStatus.js
+new file mode 100644
+index 0000000..21fcc3b
+--- /dev/null
++++ b/frontend/src/constants/orderStatus.js
+@@ -0,0 +1,18 @@
++export const ORDER_STATUS = {
++  PENDING: { label: 'En attente', className: 'text-ink-soft' },
++  CONFIRMED: { label: 'Confirmée', className: 'text-brand-600' },
++  SHIPPED: { label: 'Expédiée', className: 'text-brand-600' },
++  DELIVERED: { label: 'Livrée', className: 'text-deal-down' },
++  CANCELLED: { label: 'Annulée', className: 'text-deal-up' },
++}
++
++// Miroir de OrderService.ALLOWED_TRANSITIONS côté backend — sert seulement à
++// ne proposer que des transitions valides dans le <select> admin ; la vraie
++// validation reste faite côté serveur.
++export const ORDER_STATUS_TRANSITIONS = {
++  PENDING: ['CONFIRMED', 'CANCELLED'],
++  CONFIRMED: ['SHIPPED', 'CANCELLED'],
++  SHIPPED: ['DELIVERED'],
++  DELIVERED: [],
++  CANCELLED: [],
++}
+diff --git a/frontend/src/hooks/useAdmin.js b/frontend/src/hooks/useAdmin.js
+new file mode 100644
+index 0000000..17a5e68
+--- /dev/null
++++ b/frontend/src/hooks/useAdmin.js
+@@ -0,0 +1,88 @@
++import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
++import { productApi } from '../api/productApi'
++import { orderApi } from '../api/orderApi'
++
++// --- Produits ---
++
++export function useUpdateProduct() {
++  const queryClient = useQueryClient()
++  return useMutation({
++    mutationFn: ({ id, data }) => productApi.update(id, data),
++    onSuccess: (_, { id }) => {
++      queryClient.invalidateQueries({ queryKey: ['product', id] })
++      queryClient.invalidateQueries({ queryKey: ['products'] })
++      queryClient.invalidateQueries({ queryKey: ['productSearch'] })
++    },
++  })
++}
++
++export function useCreateProduct() {
++  const queryClient = useQueryClient()
++  return useMutation({
++    mutationFn: productApi.create,
++    onSuccess: () => {
++      queryClient.invalidateQueries({ queryKey: ['products'] })
++      queryClient.invalidateQueries({ queryKey: ['productSearch'] })
++    },
++  })
++}
++
++export function useSetColorImage() {
++  const queryClient = useQueryClient()
++  return useMutation({
++    mutationFn: ({ productId, color, imageUrl }) => productApi.setColorImage(productId, color, imageUrl),
++    onSuccess: (_, { productId }) => {
++      queryClient.invalidateQueries({ queryKey: ['product', productId] })
++    },
++  })
++}
++
++// --- Stock (unités) ---
++
++export function useProductUnits(productId) {
++  return useQuery({
++    queryKey: ['productUnits', productId],
++    queryFn: () => productApi.getUnits(productId),
++    enabled: !!productId,
++  })
++}
++
++export function useAddUnit() {
++  const queryClient = useQueryClient()
++  return useMutation({
++    mutationFn: ({ productId, data }) => productApi.addUnit(productId, data),
++    onSuccess: (_, { productId }) => {
++      queryClient.invalidateQueries({ queryKey: ['productUnits', productId] })
++      queryClient.invalidateQueries({ queryKey: ['product', productId] })
++    },
++  })
++}
++
++export function useUpdateUnitStatus() {
++  const queryClient = useQueryClient()
++  return useMutation({
++    mutationFn: ({ productId, unitId, status }) => productApi.updateUnitStatus(productId, unitId, status),
++    onSuccess: (_, { productId }) => {
++      queryClient.invalidateQueries({ queryKey: ['productUnits', productId] })
++      queryClient.invalidateQueries({ queryKey: ['product', productId] })
++    },
++  })
++}
++
++// --- Commandes ---
++
++export function useAdminOrders(page = 0) {
++  return useQuery({
++    queryKey: ['adminOrders', page],
++    queryFn: () => orderApi.adminGetAll({ page }),
++    placeholderData: (prev) => prev,
++  })
++}
++
++export function useUpdateOrderStatus() {
++  const queryClient = useQueryClient()
++  return useMutation({
++    mutationFn: ({ orderId, status }) => orderApi.adminUpdateStatus(orderId, status),
++    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['adminOrders'] }),
++  })
++}
+diff --git a/frontend/src/pages/OrderHistoryPage.jsx b/frontend/src/pages/OrderHistoryPage.jsx
+index 296a9ce..0c9af02 100644
+--- a/frontend/src/pages/OrderHistoryPage.jsx
++++ b/frontend/src/pages/OrderHistoryPage.jsx
+@@ -3,19 +3,12 @@ import { Link } from 'react-router-dom'
+ import { PackageSearch } from 'lucide-react'
+ import { useOrderHistory } from '../hooks/useOrders'
+ import { formatDate } from '../utils/formatDate'
++import { ORDER_STATUS } from '../constants/orderStatus'
+ import PriceTag from '../components/common/PriceTag'
+ import Pagination from '../components/common/Pagination'
+ import LoadingSpinner from '../components/common/LoadingSpinner'
+ import ErrorBanner from '../components/common/ErrorBanner'
+ 
+-const STATUS = {
+-  PENDING: { label: 'En attente', className: 'text-ink-soft' },
+-  CONFIRMED: { label: 'Confirmée', className: 'text-brand-600' },
+-  SHIPPED: { label: 'Expédiée', className: 'text-brand-600' },
+-  DELIVERED: { label: 'Livrée', className: 'text-deal-down' },
+-  CANCELLED: { label: 'Annulée', className: 'text-deal-up' },
+-}
+-
+ export default function OrderHistoryPage() {
+   const [page, setPage] = useState(0)
+   const { data, isLoading, isError } = useOrderHistory(page)
+@@ -57,7 +50,7 @@ export default function OrderHistoryPage() {
+       ) : (
+         <div className="mt-10">
+           {orders.map((order) => {
+-            const status = STATUS[order.status] || { label: order.status, className: 'text-ink-soft' }
++            const status = ORDER_STATUS[order.status] || { label: order.status, className: 'text-ink-soft' }
+             return (
+               <Link
+                 key={order.id}
+diff --git a/frontend/src/pages/admin/AdminDashboardPage.jsx b/frontend/src/pages/admin/AdminDashboardPage.jsx
+index 5bf484c..1f5ef05 100644
+--- a/frontend/src/pages/admin/AdminDashboardPage.jsx
++++ b/frontend/src/pages/admin/AdminDashboardPage.jsx
+@@ -23,8 +23,11 @@ export default function AdminDashboardPage() {
+ 
+   return (
+     <div>
+-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+-        <h1 className="text-2xl">Vue d’ensemble</h1>
++      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
++        <div>
++          <p className="eyebrow mb-3">Administration</p>
++          <h1 className="font-display text-3xl font-medium text-ink">Vue d’ensemble</h1>
++        </div>
+         <DateRangePicker from={range.from} to={range.to} onChange={setRange} />
+       </div>
+ 
+diff --git a/frontend/src/pages/admin/AdminLayout.jsx b/frontend/src/pages/admin/AdminLayout.jsx
+index e10e763..02ec813 100644
+--- a/frontend/src/pages/admin/AdminLayout.jsx
++++ b/frontend/src/pages/admin/AdminLayout.jsx
+@@ -3,7 +3,7 @@ import AdminSidebar from '../../components/admin/AdminSidebar'
+ 
+ export default function AdminLayout() {
+   return (
+-    <div className="flex min-h-[calc(100vh-57px)]">
++    <div className="flex min-h-screen">
+       <AdminSidebar />
+       <main className="flex-1 bg-surface-muted px-8 py-8">
+         <Outlet />
+diff --git a/frontend/src/pages/admin/AdminOrdersPage.jsx b/frontend/src/pages/admin/AdminOrdersPage.jsx
+new file mode 100644
+index 0000000..e1c3f3b
+--- /dev/null
++++ b/frontend/src/pages/admin/AdminOrdersPage.jsx
+@@ -0,0 +1,71 @@
++import { useState } from 'react'
++import toast from 'react-hot-toast'
++import { useAdminOrders, useUpdateOrderStatus } from '../../hooks/useAdmin'
++import { formatDate } from '../../utils/formatDate'
++import PriceTag from '../../components/common/PriceTag'
++import Pagination from '../../components/common/Pagination'
++import LoadingSpinner from '../../components/common/LoadingSpinner'
++import ErrorBanner from '../../components/common/ErrorBanner'
++import OrderStatusSelect from '../../components/admin/OrderStatusSelect'
++
++export default function AdminOrdersPage() {
++  const [page, setPage] = useState(0)
++  const { data, isLoading, isError } = useAdminOrders(page)
++  const updateStatus = useUpdateOrderStatus()
++
++  const handleStatusChange = (orderId, status) => {
++    updateStatus.mutate(
++      { orderId, status },
++      {
++        onError: (err) => toast.error(err.response?.data?.message || 'Transition invalide'),
++      }
++    )
++  }
++
++  return (
++    <div>
++      <p className="eyebrow mb-3">Administration</p>
++      <h1 className="font-display text-3xl font-medium text-ink">Commandes</h1>
++
++      {isLoading && <LoadingSpinner label="Chargement des commandes…" />}
++      {isError && <ErrorBanner message="Impossible de charger les commandes." />}
++
++      {data && (
++        <div className="mt-8 border border-line bg-surface">
++          <div className="grid grid-cols-[80px_1fr_120px_100px_110px_140px] gap-4 border-b border-line px-4 py-3 text-xs font-medium uppercase tracking-wide text-ink-soft">
++            <span>Commande</span>
++            <span>Client</span>
++            <span>Articles</span>
++            <span>Total</span>
++            <span>Date</span>
++            <span>Statut</span>
++          </div>
++
++          {data.content.map((order) => (
++            <div
++              key={order.id}
++              className="grid grid-cols-[80px_1fr_120px_100px_110px_140px] items-center gap-4 border-b border-line px-4 py-3 text-sm last:border-b-0"
++            >
++              <span className="font-mono text-ink">#{order.id}</span>
++              <span className="truncate text-ink-soft">{order.userEmail}</span>
++              <span className="text-ink-soft">{order.itemCount}</span>
++              <PriceTag price={order.total} size="sm" />
++              <span className="text-xs text-ink-soft">{formatDate(order.createdAt)}</span>
++              <OrderStatusSelect
++                status={order.status}
++                disabled={updateStatus.isPending}
++                onChange={(status) => handleStatusChange(order.id, status)}
++              />
++            </div>
++          ))}
++
++          {data.content.length === 0 && (
++            <p className="px-4 py-8 text-center text-sm text-ink-soft">Aucune commande pour l’instant.</p>
++          )}
++        </div>
++      )}
++
++      {data && <Pagination page={page} totalPages={data.totalPages} onPageChange={setPage} />}
++    </div>
++  )
++}
+diff --git a/frontend/src/pages/admin/AdminPricingHistoryPage.jsx b/frontend/src/pages/admin/AdminPricingHistoryPage.jsx
+index 8eac6cb..f083792 100644
+--- a/frontend/src/pages/admin/AdminPricingHistoryPage.jsx
++++ b/frontend/src/pages/admin/AdminPricingHistoryPage.jsx
+@@ -11,16 +11,17 @@ export default function AdminPricingHistoryPage() {
+ 
+   return (
+     <div>
+-      <h1 className="mb-6 text-2xl">Historique des ajustements de prix</h1>
++      <p className="eyebrow mb-3">Administration</p>
++      <h1 className="font-display text-3xl font-medium text-ink">Historique des ajustements de prix</h1>
+ 
+-      {isLoading && <LoadingSpinner label="Chargement de l'historique…" />}
+-      {isError && <ErrorBanner message="Impossible de charger l'historique." />}
++      {isLoading && <div className="mt-8"><LoadingSpinner label="Chargement de l'historique…" /></div>}
++      {isError && <div className="mt-8"><ErrorBanner message="Impossible de charger l'historique." /></div>}
+ 
+       {data && (
+-        <>
++        <div className="mt-8">
+           <PriceHistoryTable entries={data.content} />
+           <Pagination page={page} totalPages={data.totalPages} onPageChange={setPage} />
+-        </>
++        </div>
+       )}
+     </div>
+   )
+diff --git a/frontend/src/pages/admin/AdminProductsPage.jsx b/frontend/src/pages/admin/AdminProductsPage.jsx
+index 8a43e64..5131835 100644
+--- a/frontend/src/pages/admin/AdminProductsPage.jsx
++++ b/frontend/src/pages/admin/AdminProductsPage.jsx
+@@ -1,44 +1,53 @@
+ import { useState } from 'react'
+-import { useProducts } from '../../hooks/useProducts'
+-import ProductForm from '../../components/admin/ProductForm'
+-import ProductUnitForm from '../../components/admin/ProductUnitForm'
++import { useProducts, useProductDetail } from '../../hooks/useProducts'
++import AdminProductList from '../../components/admin/AdminProductList'
++import ProductEditForm from '../../components/admin/ProductEditForm'
++import ColorImagesManager from '../../components/admin/ColorImagesManager'
++import ProductUnitsPanel from '../../components/admin/ProductUnitsPanel'
+ import LoadingSpinner from '../../components/common/LoadingSpinner'
++import ErrorBanner from '../../components/common/ErrorBanner'
+ 
+ export default function AdminProductsPage() {
+-  const { data, isLoading } = useProducts({ size: 50 })
+-  const [selectedProductId, setSelectedProductId] = useState(null)
++  const [selectedId, setSelectedId] = useState(null)
++
++  // Liste à plat, sans pagination : suffisant pour un catalogue de la taille
++  // d'un projet étudiant, et évite la complexité d'une pagination dans une
++  // colonne de sélection.
++  const { data: listData, isLoading: isListLoading } = useProducts({ size: 100 })
++  const { data: detail, isLoading: isDetailLoading, isError: isDetailError } = useProductDetail(selectedId)
++
++  const products = listData?.content || []
+ 
+   return (
+     <div>
+-      <h1 className="mb-6 text-2xl">Produits & stock</h1>
++      <p className="eyebrow mb-3">Administration</p>
++      <h1 className="font-display text-3xl font-medium text-ink">Produits</h1>
+ 
+-      <div className="grid gap-6 lg:grid-cols-2">
+-        <div className="flex flex-col gap-6">
+-          <ProductForm onCreated={(p) => setSelectedProductId(p.id)} />
+-          <ProductUnitForm productId={selectedProductId} />
+-        </div>
++      <div className="mt-8 flex gap-8">
++        {isListLoading ? (
++          <div className="w-64 shrink-0"><LoadingSpinner label="Chargement…" /></div>
++        ) : (
++          <AdminProductList
++            products={products}
++            selectedId={selectedId}
++            onSelect={setSelectedId}
++            onNew={() => setSelectedId(null)}
++          />
++        )}
+ 
+-        <div className="rounded-xl border border-surface-sunken bg-surface p-5">
+-          <h3 className="mb-3 font-display text-sm font-semibold">Produits existants</h3>
+-          {isLoading ? (
+-            <LoadingSpinner label="Chargement…" />
++        <div className="flex-1 flex flex-col gap-6">
++          {selectedId === null ? (
++            <ProductEditForm product={null} onCreated={(created) => setSelectedId(created.id)} />
++          ) : isDetailLoading ? (
++            <LoadingSpinner label="Chargement du produit…" />
++          ) : isDetailError || !detail ? (
++            <ErrorBanner message="Impossible de charger ce produit." />
+           ) : (
+-            <ul className="flex flex-col gap-1">
+-              {data?.content?.map((p) => (
+-                <li key={p.id}>
+-                  <button
+-                    onClick={() => setSelectedProductId(p.id)}
+-                    className={`w-full rounded-md px-3 py-2 text-left text-sm transition ${
+-                      selectedProductId === p.id
+-                        ? 'bg-brand-50 text-brand-700'
+-                        : 'hover:bg-surface-muted'
+-                    }`}
+-                  >
+-                    <span className="font-mono text-xs text-ink-soft">#{p.id}</span> {p.name}
+-                  </button>
+-                </li>
+-              ))}
+-            </ul>
++            <>
++              <ProductEditForm product={detail.product} />
++              <ColorImagesManager productId={selectedId} colorImages={detail.product.colorImages} />
++              <ProductUnitsPanel productId={selectedId} />
++            </>
+           )}
+         </div>
+       </div>
+diff --git a/frontend/src/routes/AppRouter.jsx b/frontend/src/routes/AppRouter.jsx
+index 7e8000d..6cde907 100644
+--- a/frontend/src/routes/AppRouter.jsx
++++ b/frontend/src/routes/AppRouter.jsx
+@@ -18,6 +18,7 @@ import RegisterPage from '../pages/RegisterPage'
+ import AdminLayout from '../pages/admin/AdminLayout'
+ import AdminDashboardPage from '../pages/admin/AdminDashboardPage'
+ import AdminProductsPage from '../pages/admin/AdminProductsPage'
++import AdminOrdersPage from '../pages/admin/AdminOrdersPage'
+ import AdminPricingHistoryPage from '../pages/admin/AdminPricingHistoryPage'
+ 
+ // React Router ne fait pas défiler la page vers une ancre (#hash) tout seul
+@@ -72,6 +73,7 @@ export default function AppRouter() {
+             <Route path="/admin" element={<AdminLayout />}>
+               <Route index element={<AdminDashboardPage />} />
+               <Route path="products" element={<AdminProductsPage />} />
++              <Route path="orders" element={<AdminOrdersPage />} />
+               <Route path="pricing" element={<AdminPricingHistoryPage />} />
+             </Route>
+           </Route>

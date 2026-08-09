@@ -1,6 +1,7 @@
 package com.ecommerce.commande.service;
 
 import com.ecommerce.auth.UserPrincipal;
+import com.ecommerce.auth.UserRepository;
 import com.ecommerce.catalogue.entity.Product;
 import com.ecommerce.catalogue.entity.ProductUnit;
 import com.ecommerce.catalogue.repository.ProductRepository;
@@ -21,6 +22,7 @@ import com.ecommerce.panier.repository.CartRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -31,6 +33,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -41,6 +44,7 @@ public class OrderService {
     private final ProductRepository productRepository;
     private final ProductUnitRepository productUnitRepository;
     private final OrderRepository orderRepository;
+    private final UserRepository userRepository;
     private final CacheManager cacheManager;
 
     /**
@@ -140,6 +144,75 @@ public class OrderService {
 
         return com.ecommerce.common.dto.PageResponse.from(
                 orderRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable), this::toDTO);
+    }
+
+    /** Vue admin : toutes les commandes, tous utilisateurs confondus. */
+    public com.ecommerce.common.dto.PageResponse<com.ecommerce.commande.dto.AdminOrderDTO> getAllOrders(Pageable pageable) {
+        Page<Order> page = orderRepository.findAllByOrderByCreatedAtDesc(pageable);
+
+        Map<Long, String> emailsByUserId = userRepository.findAllById(
+                        page.getContent().stream().map(Order::getUserId).distinct().toList())
+                .stream()
+                .collect(java.util.stream.Collectors.toMap(com.ecommerce.auth.User::getId, com.ecommerce.auth.User::getEmail));
+
+        return com.ecommerce.common.dto.PageResponse.from(page, order -> com.ecommerce.commande.dto.AdminOrderDTO.builder()
+                .id(order.getId())
+                .userId(order.getUserId())
+                .userEmail(emailsByUserId.getOrDefault(order.getUserId(), "—"))
+                .status(order.getStatus())
+                .total(order.getTotal())
+                .itemCount(order.getItems().size())
+                .createdAt(order.getCreatedAt())
+                .build());
+    }
+
+    /**
+     * Transitions autorisées uniquement — évite qu'un admin ne remette par
+     * erreur une commande livrée en "en attente", par exemple. CANCELLED
+     * n'est atteignable que depuis PENDING/CONFIRMED (pas de retour en
+     * arrière après expédition, ça passerait par un retour produit, pas
+     * une simple annulation).
+     */
+    private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED_TRANSITIONS = Map.of(
+            OrderStatus.PENDING, Set.of(OrderStatus.CONFIRMED, OrderStatus.CANCELLED),
+            OrderStatus.CONFIRMED, Set.of(OrderStatus.SHIPPED, OrderStatus.CANCELLED),
+            OrderStatus.SHIPPED, Set.of(OrderStatus.DELIVERED),
+            OrderStatus.DELIVERED, Set.of(),
+            OrderStatus.CANCELLED, Set.of()
+    );
+
+    @Transactional
+    public OrderDTO updateStatus(Long orderId, OrderStatus newStatus) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Commande introuvable : " + orderId));
+
+        OrderStatus current = order.getStatus();
+        if (current == newStatus) {
+            return toDTO(order);
+        }
+        if (!ALLOWED_TRANSITIONS.getOrDefault(current, Set.of()).contains(newStatus)) {
+            throw new ConflictException("Transition invalide : " + current + " → " + newStatus);
+        }
+
+        // Une annulation remet les unités vendues en stock disponible — sans
+        // ça, l'annulation "perdrait" ces unités : elles resteraient SOLD
+        // pour toujours alors qu'aucune vente n'a réellement abouti.
+        if (newStatus == OrderStatus.CANCELLED) {
+            for (OrderItem item : order.getItems()) {
+                productUnitRepository.findById(item.getProductUnitId()).ifPresent(unit -> {
+                    unit.setStatus(UnitStatus.AVAILABLE);
+                    unit.setSoldAt(null);
+                    productUnitRepository.save(unit);
+                });
+            }
+            Set<Long> affectedProductIds = order.getItems().stream()
+                    .map(OrderItem::getProductId)
+                    .collect(java.util.stream.Collectors.toSet());
+            evictProductVariantsCache(affectedProductIds);
+        }
+
+        order.setStatus(newStatus);
+        return toDTO(orderRepository.save(order));
     }
 
     /**

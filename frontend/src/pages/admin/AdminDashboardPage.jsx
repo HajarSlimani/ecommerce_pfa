@@ -1,55 +1,41 @@
-import { useState } from 'react'
-import { usePricingImpact, usePricingHistory } from '../../hooks/usePricing'
+import { Link } from 'react-router-dom'
+import { useAdminStats } from '../../hooks/useAdmin'
 import KpiCard from '../../components/admin/KpiCard'
-import DateRangePicker from '../../components/admin/DateRangePicker'
-import RevenueImpactChart from '../../components/admin/RevenueImpactChart'
 import LoadingSpinner from '../../components/common/LoadingSpinner'
-import { formatCurrency } from '../../utils/formatCurrency'
-
-function isoDaysAgo(days) {
-  const d = new Date()
-  d.setDate(d.getDate() - days)
-  return d.toISOString().slice(0, 10)
-}
+import ErrorBanner from '../../components/common/ErrorBanner'
 
 export default function AdminDashboardPage() {
-  const [range, setRange] = useState({ from: isoDaysAgo(30), to: isoDaysAgo(0) })
-
-  const from = `${range.from}T00:00:00Z`
-  const to = `${range.to}T23:59:59Z`
-
-  const { data: impact, isLoading: impactLoading } = usePricingImpact(from, to)
-  const { data: history, isLoading: historyLoading } = usePricingHistory({ size: 200 })
+  const { data: stats, isLoading, isError } = useAdminStats()
 
   return (
     <div>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl">Vue d’ensemble</h1>
-        <DateRangePicker from={range.from} to={range.to} onChange={setRange} />
-      </div>
+      <p className="eyebrow mb-3">Administration</p>
+      <h1 className="font-display text-3xl font-medium text-ink">Dashboard</h1>
 
-      {impactLoading ? (
-        <LoadingSpinner label="Calcul de l'impact revenu…" />
-      ) : (
-        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <KpiCard label="Ajustements sur la période" value={impact?.totalAdjustments ?? 0} />
+      {isLoading && <div className="mt-8"><LoadingSpinner label="Chargement…" /></div>}
+      {isError && <div className="mt-8"><ErrorBanner message="Impossible de charger les statistiques." /></div>}
+
+      {stats && (
+        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCard label="Produits" value={stats.totalProducts} />
+          <KpiCard label="Commandes" value={stats.totalOrders} />
           <KpiCard
-            label="Impact revenu estimé (cumulé)"
-            value={formatCurrency(impact?.totalEstimatedRevenueImpact ?? 0)}
-            accent={(impact?.totalEstimatedRevenueImpact ?? 0) >= 0 ? 'down' : 'up'}
+            label="Commandes en attente"
+            value={stats.pendingOrders}
+            accent={stats.pendingOrders > 0 ? 'up' : 'ink'}
           />
-          <KpiCard
-            label="Impact moyen / ajustement"
-            value={formatCurrency(impact?.averageImpactPerAdjustment ?? 0)}
-          />
+          <KpiCard label="Utilisateurs" value={stats.totalUsers} />
         </div>
       )}
 
-      {historyLoading ? (
-        <LoadingSpinner label="Chargement de la tendance…" />
-      ) : (
-        <RevenueImpactChart historyEntries={history?.content} />
-      )}
+      <div className="mt-10 flex flex-wrap gap-4 text-sm">
+        <Link to="/admin/pricing-dynamique" className="text-ink-soft underline transition hover:text-ink">
+          Voir l’impact du pricing dynamique →
+        </Link>
+        <Link to="/admin/orders" className="text-ink-soft underline transition hover:text-ink">
+          Gérer les commandes →
+        </Link>
+      </div>
     </div>
   )
 }

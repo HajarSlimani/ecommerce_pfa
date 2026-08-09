@@ -18,7 +18,11 @@ import RegisterPage from '../pages/RegisterPage'
 import AdminLayout from '../pages/admin/AdminLayout'
 import AdminDashboardPage from '../pages/admin/AdminDashboardPage'
 import AdminProductsPage from '../pages/admin/AdminProductsPage'
+import AdminOrdersPage from '../pages/admin/AdminOrdersPage'
+import AdminPricingDynamicsPage from '../pages/admin/AdminPricingDynamicsPage'
 import AdminPricingHistoryPage from '../pages/admin/AdminPricingHistoryPage'
+import AdminUsersPage from '../pages/admin/AdminUsersPage'
+import AdminSettingsPage from '../pages/admin/AdminSettingsPage'
 
 // React Router ne fait pas défiler la page vers une ancre (#hash) tout seul
 // lors d'une navigation côté client — contrairement à un lien HTML classique.
@@ -45,14 +49,17 @@ function ScrollManager() {
 
 export default function AppRouter() {
   const location = useLocation()
+  const isAdminRoute = location.pathname.startsWith('/admin')
   // Le hero de la home passe sous la navbar transparente ; les autres pages
   // (fond clair dès le haut) ont besoin d'un padding pour ne pas passer dessous.
-  const needsTopPadding = location.pathname !== '/'
+  // L'admin a son propre chrome (sidebar + header dédiés), donc ni navbar
+  // client ni padding ici.
+  const needsTopPadding = location.pathname !== '/' && !isAdminRoute
 
   return (
     <div className="flex min-h-screen flex-col">
       <ScrollManager />
-      <Navbar />
+      {!isAdminRoute && <Navbar />}
       <div className={`flex-1 ${needsTopPadding ? 'pt-20' : ''}`}>
         <Routes>
           <Route path="/" element={<HomePage />} />
@@ -72,14 +79,18 @@ export default function AppRouter() {
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboardPage />} />
               <Route path="products" element={<AdminProductsPage />} />
+              <Route path="orders" element={<AdminOrdersPage />} />
+              <Route path="pricing-dynamique" element={<AdminPricingDynamicsPage />} />
               <Route path="pricing" element={<AdminPricingHistoryPage />} />
+              <Route path="users" element={<AdminUsersPage />} />
+              <Route path="settings" element={<AdminSettingsPage />} />
             </Route>
           </Route>
 
           <Route path="*" element={<NotFound />} />
         </Routes>
       </div>
-      <Footer />
+      {!isAdminRoute && <Footer />}
     </div>
   )
 }

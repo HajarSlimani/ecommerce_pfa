@@ -3,18 +3,11 @@ import { Link } from 'react-router-dom'
 import { PackageSearch } from 'lucide-react'
 import { useOrderHistory } from '../hooks/useOrders'
 import { formatDate } from '../utils/formatDate'
+import { ORDER_STATUS } from '../constants/orderStatus'
 import PriceTag from '../components/common/PriceTag'
 import Pagination from '../components/common/Pagination'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorBanner from '../components/common/ErrorBanner'
-
-const STATUS = {
-  PENDING: { label: 'En attente', className: 'text-ink-soft' },
-  CONFIRMED: { label: 'Confirmée', className: 'text-brand-600' },
-  SHIPPED: { label: 'Expédiée', className: 'text-brand-600' },
-  DELIVERED: { label: 'Livrée', className: 'text-deal-down' },
-  CANCELLED: { label: 'Annulée', className: 'text-deal-up' },
-}
 
 export default function OrderHistoryPage() {
   const [page, setPage] = useState(0)
@@ -57,7 +50,7 @@ export default function OrderHistoryPage() {
       ) : (
         <div className="mt-10">
           {orders.map((order) => {
-            const status = STATUS[order.status] || { label: order.status, className: 'text-ink-soft' }
+            const status = ORDER_STATUS[order.status] || { label: order.status, className: 'text-ink-soft' }
             return (
               <Link
                 key={order.id}

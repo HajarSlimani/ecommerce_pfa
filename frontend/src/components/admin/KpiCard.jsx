@@ -6,9 +6,9 @@ export default function KpiCard({ label, value, accent = 'ink' }) {
   }
 
   return (
-    <div className="rounded-xl border border-surface-sunken bg-surface p-5">
-      <div className="text-xs uppercase tracking-wide text-ink-soft">{label}</div>
-      <div className={`tabular-price mt-2 text-2xl font-semibold ${accentClasses[accent]}`}>{value}</div>
+    <div className="border border-line bg-surface p-5">
+      <div className="eyebrow">{label}</div>
+      <div className={`tabular-price mt-3 font-display text-2xl font-medium ${accentClasses[accent]}`}>{value}</div>
     </div>
   )
 }

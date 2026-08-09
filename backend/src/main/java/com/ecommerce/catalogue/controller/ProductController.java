@@ -63,12 +63,35 @@ public class ProductController {
         return ResponseEntity.ok(productService.createProduct(request));
     }
 
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ProductDTO> update(@PathVariable Long id,
+                                              @Valid @RequestBody com.ecommerce.catalogue.dto.UpdateProductRequest request) {
+        return ResponseEntity.ok(productService.updateProduct(id, request));
+    }
+
     @PostMapping("/{id}/units")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> addUnit(@PathVariable Long id,
                                          @Valid @RequestBody com.ecommerce.catalogue.dto.CreateProductUnitRequest request) {
         productService.addUnit(id, request);
         return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).build();
+    }
+
+    /** Vue admin : toutes les unités de stock d'un produit, tous statuts confondus. */
+    @GetMapping("/{id}/units")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<java.util.List<com.ecommerce.catalogue.dto.ProductUnitDTO>> getUnits(@PathVariable Long id) {
+        return ResponseEntity.ok(productService.getUnits(id));
+    }
+
+    @PatchMapping("/{id}/units/{unitId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<com.ecommerce.catalogue.dto.ProductUnitDTO> updateUnitStatus(
+            @PathVariable Long id,
+            @PathVariable Long unitId,
+            @Valid @RequestBody com.ecommerce.catalogue.dto.UpdateUnitStatusRequest request) {
+        return ResponseEntity.ok(productService.updateUnitStatus(unitId, request.getStatus()));
     }
 
     /**

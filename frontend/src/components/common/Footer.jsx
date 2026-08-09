@@ -7,7 +7,7 @@ export default function Footer() {
       <div className="mx-auto grid max-w-6xl gap-10 px-6 py-14 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <Link to="/" className="font-display text-lg font-medium text-ink">
-            NewDev <span className="italic text-brand-500">Shop</span>
+            Hajar <span className="italic text-brand-500">Shop</span>
           </Link>
           <p className="mt-3 max-w-xs text-sm leading-relaxed text-ink-soft">
             Électronique reconditionnée, contrôlée et garantie. Les prix s’ajustent
@@ -46,7 +46,7 @@ export default function Footer() {
 
       <div className="border-t border-line px-6 py-5">
         <p className="mx-auto max-w-6xl text-xs text-ink-soft">
-          © {new Date().getFullYear()} NewDev Shop.
+          © {new Date().getFullYear()} Hajar Shop.
         </p>
       </div>
     </footer>

@@ -8,10 +8,10 @@ export default function PriceHistoryTable({ entries }) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-surface-sunken bg-surface">
+    <div className="overflow-x-auto border border-line bg-surface">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-surface-sunken text-left text-xs uppercase tracking-wide text-ink-soft">
+          <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-soft">
             <th className="px-4 py-3">Produit</th>
             <th className="px-4 py-3">Grade</th>
             <th className="px-4 py-3">Ancien prix</th>
@@ -23,7 +23,7 @@ export default function PriceHistoryTable({ entries }) {
         </thead>
         <tbody>
           {entries.map((e) => (
-            <tr key={e.id} className="border-b border-surface-sunken last:border-0">
+            <tr key={e.id} className="border-b border-line last:border-0">
               <td className="px-4 py-3 font-medium text-ink">{e.productName || `#${e.productId}`}</td>
               <td className="px-4 py-3 font-mono text-xs">{e.grade}</td>
               <td className="px-4 py-3 tabular-price text-ink-soft">{formatCurrency(e.oldPrice)}</td>

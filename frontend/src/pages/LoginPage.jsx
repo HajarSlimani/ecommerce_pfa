@@ -20,12 +20,20 @@ export default function LoginPage() {
     e.preventDefault()
     setIsSubmitting(true)
     try {
-      await login(form)
+      const res = await login(form)
       // Le panier invité éventuel vient d'être fusionné côté backend :
       // on invalide le cache pour refléter le panier fusionné.
       queryClient.invalidateQueries({ queryKey: ['cart'] })
       toast.success('Connexion réussie')
-      navigate(location.state?.from?.pathname || '/')
+
+      const from = location.state?.from?.pathname
+      // Un admin qui se connecte atterrit sur le tableau de bord, sauf s'il
+      // venait spécifiquement d'une sous-page admin (lien direct, favori…).
+      if (res.role === 'ADMIN' && !from?.startsWith('/admin')) {
+        navigate('/admin')
+      } else {
+        navigate(from || '/')
+      }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Identifiants invalides')
     } finally {

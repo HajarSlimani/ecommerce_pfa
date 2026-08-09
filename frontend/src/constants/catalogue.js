@@ -5,6 +5,13 @@ export const CATEGORIES = [
   { id: 'electronics', label: 'Électronique' },
 ]
 
+export const UNIT_STATUS = {
+  AVAILABLE: { label: 'Disponible', className: 'text-deal-down' },
+  SOLD: { label: 'Vendue', className: 'text-ink-soft' },
+  RETURNED: { label: 'Retournée', className: 'text-brand-600' },
+  DEFECTIVE: { label: 'Défectueuse', className: 'text-deal-up' },
+}
+
 export const GRADES = [
   {
     code: 'NEUF',

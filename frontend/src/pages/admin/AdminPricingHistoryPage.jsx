@@ -11,16 +11,17 @@ export default function AdminPricingHistoryPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl">Historique des ajustements de prix</h1>
+      <p className="eyebrow mb-3">Administration</p>
+      <h1 className="font-display text-3xl font-medium text-ink">Historique des ajustements de prix</h1>
 
-      {isLoading && <LoadingSpinner label="Chargement de l'historique…" />}
-      {isError && <ErrorBanner message="Impossible de charger l'historique." />}
+      {isLoading && <div className="mt-8"><LoadingSpinner label="Chargement de l'historique…" /></div>}
+      {isError && <div className="mt-8"><ErrorBanner message="Impossible de charger l'historique." /></div>}
 
       {data && (
-        <>
+        <div className="mt-8">
           <PriceHistoryTable entries={data.content} />
           <Pagination page={page} totalPages={data.totalPages} onPageChange={setPage} />
-        </>
+        </div>
       )}
     </div>
   )
