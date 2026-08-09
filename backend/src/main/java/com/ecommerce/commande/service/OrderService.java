@@ -113,10 +113,14 @@ public class OrderService {
 
         order.setItems(orderItems);
         order.setTotal(total);
-        order.setStatus(OrderStatus.CONFIRMED);
+        // Reste PENDING ici : sans passerelle de paiement réelle, on simule
+        // l'attente de paiement plutôt que de confirmer instantanément — le
+        // client doit "payer" (bouton dédié côté front) pour passer à
+        // CONFIRMED, voir confirmPayment ci-dessous.
         Order saved = orderRepository.save(order);
 
-        // Vider le panier une fois la commande confirmée
+        // Vider le panier une fois la commande enregistrée (elle est encore
+        // PENDING à ce stade, pas encore CONFIRMED — voir confirmPayment).
         cart.getItems().clear();
         cartRepository.save(cart);
 
@@ -136,6 +140,30 @@ public class OrderService {
         assertOwnerOrAdmin(order.getUserId(), principal);
 
         return toDTO(order);
+    }
+
+    /**
+     * Simule le paiement : pas de vraie passerelle intégrée, donc le client
+     * "paie" en cliquant un bouton dédié côté front plutôt que la commande
+     * ne passe automatiquement CONFIRMED au checkout. Volontairement plus
+     * restreint que updateStatus (admin) : uniquement PENDING → CONFIRMED,
+     * et uniquement par le propriétaire de la commande (pas d'admin ici,
+     * ça n'aurait pas de sens qu'un admin "paie" à la place du client).
+     */
+    @Transactional
+    public OrderDTO confirmPayment(Long orderId, UserPrincipal principal) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Commande introuvable : " + orderId));
+
+        if (!principal.getId().equals(order.getUserId())) {
+            throw new AccessDeniedException("Vous n'avez pas accès à cette ressource");
+        }
+        if (order.getStatus() != OrderStatus.PENDING) {
+            throw new ConflictException("Cette commande n'est plus en attente de paiement");
+        }
+
+        order.setStatus(OrderStatus.CONFIRMED);
+        return toDTO(orderRepository.save(order));
     }
 
     @Transactional

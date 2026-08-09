@@ -1,0 +1,219 @@
+diff --git a/backend/src/main/java/com/ecommerce/commande/controller/OrderController.java b/backend/src/main/java/com/ecommerce/commande/controller/OrderController.java
+index 999f82d..53df229 100644
+--- a/backend/src/main/java/com/ecommerce/commande/controller/OrderController.java
++++ b/backend/src/main/java/com/ecommerce/commande/controller/OrderController.java
+@@ -27,6 +27,12 @@ public class OrderController {
+         return ResponseEntity.ok(orderService.getOrder(id, principal));
+     }
+ 
++    /** Paiement simulé — voir OrderService#confirmPayment. */
++    @PostMapping("/{id}/confirm-payment")
++    public ResponseEntity<OrderDTO> confirmPayment(@AuthenticationPrincipal UserPrincipal principal, @PathVariable Long id) {
++        return ResponseEntity.ok(orderService.confirmPayment(id, principal));
++    }
++
+     @GetMapping("/user/{userId}")
+     public ResponseEntity<PageResponse<OrderDTO>> getOrdersForUser(@AuthenticationPrincipal UserPrincipal principal,
+                                                             @PathVariable Long userId, Pageable pageable) {
+diff --git a/backend/src/main/java/com/ecommerce/commande/service/OrderService.java b/backend/src/main/java/com/ecommerce/commande/service/OrderService.java
+index 4dd8f5c..29f752a 100644
+--- a/backend/src/main/java/com/ecommerce/commande/service/OrderService.java
++++ b/backend/src/main/java/com/ecommerce/commande/service/OrderService.java
+@@ -113,10 +113,14 @@ public class OrderService {
+ 
+         order.setItems(orderItems);
+         order.setTotal(total);
+-        order.setStatus(OrderStatus.CONFIRMED);
++        // Reste PENDING ici : sans passerelle de paiement réelle, on simule
++        // l'attente de paiement plutôt que de confirmer instantanément — le
++        // client doit "payer" (bouton dédié côté front) pour passer à
++        // CONFIRMED, voir confirmPayment ci-dessous.
+         Order saved = orderRepository.save(order);
+ 
+-        // Vider le panier une fois la commande confirmée
++        // Vider le panier une fois la commande enregistrée (elle est encore
++        // PENDING à ce stade, pas encore CONFIRMED — voir confirmPayment).
+         cart.getItems().clear();
+         cartRepository.save(cart);
+ 
+@@ -138,6 +142,30 @@ public class OrderService {
+         return toDTO(order);
+     }
+ 
++    /**
++     * Simule le paiement : pas de vraie passerelle intégrée, donc le client
++     * "paie" en cliquant un bouton dédié côté front plutôt que la commande
++     * ne passe automatiquement CONFIRMED au checkout. Volontairement plus
++     * restreint que updateStatus (admin) : uniquement PENDING → CONFIRMED,
++     * et uniquement par le propriétaire de la commande (pas d'admin ici,
++     * ça n'aurait pas de sens qu'un admin "paie" à la place du client).
++     */
++    @Transactional
++    public OrderDTO confirmPayment(Long orderId, UserPrincipal principal) {
++        Order order = orderRepository.findById(orderId)
++                .orElseThrow(() -> new ResourceNotFoundException("Commande introuvable : " + orderId));
++
++        if (!principal.getId().equals(order.getUserId())) {
++            throw new AccessDeniedException("Vous n'avez pas accès à cette ressource");
++        }
++        if (order.getStatus() != OrderStatus.PENDING) {
++            throw new ConflictException("Cette commande n'est plus en attente de paiement");
++        }
++
++        order.setStatus(OrderStatus.CONFIRMED);
++        return toDTO(orderRepository.save(order));
++    }
++
+     @Transactional
+     public com.ecommerce.common.dto.PageResponse<OrderDTO> getOrdersForUser(Long userId, UserPrincipal principal, Pageable pageable) {
+         assertOwnerOrAdmin(userId, principal);
+diff --git a/frontend/src/api/orderApi.js b/frontend/src/api/orderApi.js
+index bc5d874..fe9a28e 100644
+--- a/frontend/src/api/orderApi.js
++++ b/frontend/src/api/orderApi.js
+@@ -3,6 +3,7 @@ import axiosInstance from './axiosInstance'
+ export const orderApi = {
+   checkout: () => axiosInstance.post('/orders').then((r) => r.data),
+   getById: (id) => axiosInstance.get(`/orders/${id}`).then((r) => r.data),
++  confirmPayment: (id) => axiosInstance.post(`/orders/${id}/confirm-payment`).then((r) => r.data),
+   getForUser: (userId, { page = 0, size = 10 } = {}) =>
+     axiosInstance.get(`/orders/user/${userId}`, { params: { page, size } }).then((r) => r.data),
+ 
+diff --git a/frontend/src/components/cart/CartSummary.jsx b/frontend/src/components/cart/CartSummary.jsx
+index 9a70ba9..cbfd34a 100644
+--- a/frontend/src/components/cart/CartSummary.jsx
++++ b/frontend/src/components/cart/CartSummary.jsx
+@@ -27,7 +27,7 @@ export default function CartSummary({ total, disabled }) {
+ 
+     checkout.mutate(undefined, {
+       onSuccess: (order) => {
+-        toast.success('Commande confirmée')
++        toast.success('Commande enregistrée')
+         navigate(`/orders/confirmation/${order.id}`)
+       },
+       onError: (err) => {
+diff --git a/frontend/src/hooks/useOrders.js b/frontend/src/hooks/useOrders.js
+index 0dd093e..2423b36 100644
+--- a/frontend/src/hooks/useOrders.js
++++ b/frontend/src/hooks/useOrders.js
+@@ -29,3 +29,14 @@ export function useOrder(orderId) {
+     enabled: !!orderId,
+   })
+ }
++
++export function useConfirmPayment() {
++  const queryClient = useQueryClient()
++  return useMutation({
++    mutationFn: orderApi.confirmPayment,
++    onSuccess: (order) => {
++      queryClient.invalidateQueries({ queryKey: ['order', order.id] })
++      queryClient.invalidateQueries({ queryKey: ['orders'] })
++    },
++  })
++}
+diff --git a/frontend/src/pages/OrderConfirmationPage.jsx b/frontend/src/pages/OrderConfirmationPage.jsx
+index 9cc2bc8..bec1fbb 100644
+--- a/frontend/src/pages/OrderConfirmationPage.jsx
++++ b/frontend/src/pages/OrderConfirmationPage.jsx
+@@ -1,6 +1,7 @@
+ import { Link, useParams } from 'react-router-dom'
+-import { CheckCircle2 } from 'lucide-react'
+-import { useOrder } from '../hooks/useOrders'
++import toast from 'react-hot-toast'
++import { CheckCircle2, Wallet } from 'lucide-react'
++import { useOrder, useConfirmPayment } from '../hooks/useOrders'
+ import PriceTag from '../components/common/PriceTag'
+ import LoadingSpinner from '../components/common/LoadingSpinner'
+ import ErrorBanner from '../components/common/ErrorBanner'
+@@ -8,6 +9,7 @@ import ErrorBanner from '../components/common/ErrorBanner'
+ export default function OrderConfirmationPage() {
+   const { id } = useParams()
+   const { data: order, isLoading, isError } = useOrder(Number(id))
++  const confirmPayment = useConfirmPayment()
+ 
+   if (isLoading) {
+     return (
+@@ -25,13 +27,35 @@ export default function OrderConfirmationPage() {
+     )
+   }
+ 
++  const isPending = order.status === 'PENDING'
++
++  const handleConfirmPayment = () => {
++    confirmPayment.mutate(order.id, {
++      onError: (err) => toast.error(err.response?.data?.message || 'Échec du paiement'),
++    })
++  }
++
+   return (
+     <div className="mx-auto max-w-2xl px-6 py-14">
+-      <CheckCircle2 size={28} strokeWidth={1.4} className="text-deal-down" />
+-      <p className="eyebrow mb-1 mt-4">Commande confirmée</p>
+-      <h1 className="font-display text-3xl font-medium text-ink">Merci pour ta commande</h1>
++      {isPending ? (
++        <Wallet size={28} strokeWidth={1.4} className="text-brand-500" />
++      ) : (
++        <CheckCircle2 size={28} strokeWidth={1.4} className="text-deal-down" />
++      )}
++
++      <p className="eyebrow mb-1 mt-4">{isPending ? 'Paiement' : 'Commande confirmée'}</p>
++      <h1 className="font-display text-3xl font-medium text-ink">
++        {isPending ? 'Finalise ton paiement' : 'Merci pour ta commande'}
++      </h1>
+       <p className="mt-2 font-mono text-sm text-ink-soft">#{order.id}</p>
+ 
++      {isPending && (
++        <p className="mt-3 max-w-md text-sm leading-relaxed text-ink-soft">
++          Ta commande est enregistrée et le stock réservé. Il ne reste plus qu’à valider le
++          paiement pour la confirmer.
++        </p>
++      )}
++
+       <div className="mt-10 border-t border-line">
+         {order.items.map((item, idx) => (
+           <div key={idx} className="flex items-center justify-between border-b border-line py-4">
+@@ -45,17 +69,33 @@ export default function OrderConfirmationPage() {
+         </div>
+       </div>
+ 
+-      <div className="mt-8 flex flex-wrap items-center gap-6">
+-        <Link
+-          to="/boutique"
+-          className="rounded-full bg-ink px-6 py-3 text-sm font-medium text-white transition hover:bg-brand-600"
+-        >
+-          Continuer mes achats
+-        </Link>
+-        <Link to="/orders" className="text-sm text-ink-soft transition hover:text-ink">
+-          Voir toutes mes commandes
+-        </Link>
+-      </div>
++      {isPending ? (
++        <div className="mt-8">
++          <button
++            onClick={handleConfirmPayment}
++            disabled={confirmPayment.isPending}
++            className="rounded-full bg-ink px-6 py-3 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-40"
++          >
++            {confirmPayment.isPending ? 'Paiement…' : 'Simuler le paiement'}
++          </button>
++          <p className="mt-3 text-xs text-ink-soft">
++            Aucune passerelle de paiement réelle n’est intégrée — ce bouton simule une
++            confirmation de paiement pour les besoins de la démonstration.
++          </p>
++        </div>
++      ) : (
++        <div className="mt-8 flex flex-wrap items-center gap-6">
++          <Link
++            to="/boutique"
++            className="rounded-full bg-ink px-6 py-3 text-sm font-medium text-white transition hover:bg-brand-600"
++          >
++            Continuer mes achats
++          </Link>
++          <Link to="/orders" className="text-sm text-ink-soft transition hover:text-ink">
++            Voir toutes mes commandes
++          </Link>
++        </div>
++      )}
+     </div>
+   )
+ }

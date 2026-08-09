@@ -165,7 +165,7 @@ public class DataSeeder implements CommandLineRunner {
                                 new GradeDef(Grade.A, new BigDecimal("260.00"), 5),
                                 new GradeDef(Grade.C, new BigDecimal("190.00"), 3)
                         )),
-                new SeedProduct("Google Pixel 6", "Google", "smartphones",
+                new SeedProduct("Google Pixel 10", "Google", "smartphones",
                         "Smartphone Android reconditionné, 128GB.",
                         List.of(
                                 new GradeDef(Grade.A, new BigDecimal("340.00"), 4),
@@ -178,13 +178,21 @@ public class DataSeeder implements CommandLineRunner {
         String[] colors = {"Noir", "Blanc", "Bleu", "Gris sidéral"};
 
         for (SeedProduct def : defs) {
+            RealImages real = REAL_PRODUCT_IMAGES.get(def.name());
+            String imageUrl = (real != null)
+                    ? real.defaultImageUrl()
+                    : placeholderImage(def.name(), "F0EFEA", "111111");
+            Map<String, String> colorImages = (real != null)
+                    ? mergeWithPlaceholderFallback(def.name(), real.colorImages())
+                    : buildColorImages(def.name());
+
             Product product = productRepository.save(Product.builder()
                     .name(def.name())
                     .brand(def.brand())
                     .category(def.category())
                     .description(def.description())
-                    .imageUrl(placeholderImage(def.name(), "F0EFEA", "111111"))
-                    .colorImages(buildColorImages(def.name()))
+                    .imageUrl(imageUrl)
+                    .colorImages(colorImages)
                     .build());
 
             int serialCounter = 1;
@@ -343,6 +351,141 @@ public class DataSeeder implements CommandLineRunner {
         orderRepository.save(order);
 
         log.info("Commande de démo créée pour client@test.com (produit : {})", firstProduct.getName());
+    }
+
+    /**
+     * Vraies photos produit (Unsplash, licence libre — voir
+     * https://unsplash.com/license, réutilisation commerciale autorisée,
+     * hotlink via images.unsplash.com officiellement supporté par leur CDN).
+     * Volontairement PAS de vraies photos de presse Apple/Samsung/etc. : ce
+     * sont des images protégées (droit d'auteur + marque), risquées à
+     * héberger/hotlinker même en lien externe dans un repo public.
+     *
+     * EXEMPLE REMPLI : "iPhone 13 128GB" (Noir + Blanc). Pour compléter les
+     * autres produits, même pattern :
+     *
+     *   REAL_PRODUCT_IMAGES.put("Samsung Galaxy S21", new RealImages(
+     *           "<url photo par défaut>",
+     *           Map.of(
+     *                   "Noir", "<url>",
+     *                   "Blanc", "<url>",
+     *                   "Bleu", "<url>",
+     *                   "Gris sidéral", "<url>"
+     *           )));
+     *
+     * Pas besoin de fournir les 4 couleurs d'un coup : toute couleur absente
+     * de la map retombe automatiquement sur un placeholder généré (voir
+     * mergeWithPlaceholderFallback) — tu peux compléter produit par produit,
+     * couleur par couleur, sans jamais rien casser.
+     */
+    private record RealImages(String defaultImageUrl, Map<String, String> colorImages) {}
+
+    private static final Map<String, RealImages> REAL_PRODUCT_IMAGES = new LinkedHashMap<>();
+    static {
+        Map<String, String> iphone13Colors = new LinkedHashMap<>();
+        iphone13Colors.put("Noir", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQL4fVVVM8KlkWe5Qyn-sg_mEWYhJdp7dJ7dPOWMa0g6h4aCb6TeJzXvTWF&s=10");
+        iphone13Colors.put("Blanc", "https://uno.ma/pub/media/catalog/product/cache/af8d7fd2c4634f9c922fba76a4a30c04/l/d/ld0006166728.jpg");
+        iphone13Colors.put("Bleu", "https://imagedelivery.net/AZ5kNEcp8roCR6XQJU10qQ/aa54b976-3f1d-4fa3-45ae-53753d1a3f00/w=800,h=800,fit=crop");
+        iphone13Colors.put("Gris sidéral", "https://http2.mlstatic.com/D_Q_NP_655013-MLA99442466886_112025-O.webp");
+        // TODO Hajar : ajoute "Bleu" et "Gris sidéral" ici avec tes propres URLs.
+
+        REAL_PRODUCT_IMAGES.put("iPhone 13 128GB", new RealImages(
+                "https://uno.ma/pub/media/catalog/product/cache/af8d7fd2c4634f9c922fba76a4a30c04/l/d/ld0006166728.jpg",
+                iphone13Colors
+        ));
+
+        Map<String, String> samsungGalaxyS21Colors = new LinkedHashMap<>();
+        samsungGalaxyS21Colors.put("Noir", "https://media.falabella.com/falabellaCL/114048724_01/w=1500,h=1500,fit=cover");
+        samsungGalaxyS21Colors.put("Blanc", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCC7keCtthx82OcdEVmseZXZBanlu0WMGiRUJCso9EdOGPEAsBSmYRbVIB&s=10");
+        samsungGalaxyS21Colors.put("Bleu", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQWhPWUY-GtCOYtN8xVI3gy-EXP6vAse-KdQDQu3Y9_bg&s=10");
+        samsungGalaxyS21Colors.put("Gris sidéral", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQAcUt05MzZD2nAGOQd-nuqRPJ9SX0mw-qIJWkURJ4D5o8HNKFaX3Zd-EU&s=10");
+
+        REAL_PRODUCT_IMAGES.put("Samsung Galaxy S21", new RealImages(
+                "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCC7keCtthx82OcdEVmseZXZBanlu0WMGiRUJCso9EdOGPEAsBSmYRbVIB&s=10",
+                samsungGalaxyS21Colors
+        ));
+
+
+        Map<String, String> macBookAirM1Colors = new LinkedHashMap<>();
+        macBookAirM1Colors.put("Noir", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQa4ZIT_taNCa4iMFxC_mKyVzLQTT35sps_6Pg0M6xeoFS2-PyICvyn1iXg&s=10");
+        macBookAirM1Colors.put("Blanc", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSBf5SCQzy0eCL-kJhHQJgpeQXJa-Dq2GzIJr-G7_WIEQ&s=10");
+        macBookAirM1Colors.put("Bleu", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQjK0B1ZDfpPX5xAvqpaYqMVd0IiQ82nwqtHVbd3R3ZjQ&s=10");
+        macBookAirM1Colors.put("Gris sidéral", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRdYw7Iqkua_O6s58Z8SVGYjICwy87Utl25DjqgoHiZuxPeccSlHOW7cYZ2&s=10");
+
+        REAL_PRODUCT_IMAGES.put("MacBook Air M1", new RealImages(
+                "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQa4ZIT_taNCa4iMFxC_mKyVzLQTT35sps_6Pg0M6xeoFS2-PyICvyn1iXg&s=10",
+                macBookAirM1Colors
+        ));
+
+        Map<String, String> dellXPS13Colors = new LinkedHashMap<>();
+        dellXPS13Colors.put("Noir", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSAhZILELvU-z6Lnx0LYWxbXOEezxG-jFGCM5Ry7S2kxA&s=10");
+        dellXPS13Colors.put("Blanc", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT5yyp_xweESUpYXecwl7ERg2R4-tOOLRq99u6wwM6rcsGEUPewNtCIE9Y&s=10");
+        dellXPS13Colors.put("Bleu", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQl5CEKN8FX_OIx40PIKRO8dF8O6TMWZjlN0qrpgZXMOw&s=10");
+        dellXPS13Colors.put("Gris sidéral", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcThq5Dd1uuVpjvx3IlhwVH4M_vbvRDzBlVKu76vg3mIHg&s=10");
+
+        REAL_PRODUCT_IMAGES.put("Dell XPS 13", new RealImages(
+                "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT5yyp_xweESUpYXecwl7ERg2R4-tOOLRq99u6wwM6rcsGEUPewNtCIE9Y&s=10",
+                dellXPS13Colors
+        ));
+
+        Map<String, String> airPodsProColors = new LinkedHashMap<>();
+        airPodsProColors.put("Noir", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRwVkJXBuRUseyow6VIWhYDAi_Uv61N2n3c5HXBU23ccg&s=10");
+        airPodsProColors.put("Blanc", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSJhARjmKObVuJlE1dU2W7x64BSxcTIfKgXq5dvfrBvsg&s=10");
+        airPodsProColors.put("Bleu", "https://i-vse.ru/wa-data/public/shop/products/60/04/460/images/3946/3946.970.JPG");
+        airPodsProColors.put("Gris sidéral", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTzRXL95s6wqtbGliWJTD7RYSjZZzteIxrX2GTQwrapBA&s=10");
+
+        REAL_PRODUCT_IMAGES.put("AirPods Pro", new RealImages(
+                "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTzRXL95s6wqtbGliWJTD7RYSjZZzteIxrX2GTQwrapBA&s=10",
+                airPodsProColors
+        ));
+
+        Map<String, String> sonyWH1000XM4Colors = new LinkedHashMap<>();
+        sonyWH1000XM4Colors.put("Noir", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRE1kRrpRbUsVdrMsEMcMYkRxUE_m9V3ufEuI2TA5J6qK9scQMNrVXWQnE&s=10");
+        sonyWH1000XM4Colors.put("Blanc", "https://techbuzzireland.com/wp-content/uploads/2021/04/wh-1000xm4_white_with_case2-large.jpg");
+        sonyWH1000XM4Colors.put("Bleu", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRlZcDNGdZ7vCkKYR-wqsjDBnZet9bbqbXZBeC6_c-8iV1s2Wsy3F6RmL4&s=10");
+        sonyWH1000XM4Colors.put("Gris sidéral", "https://www.adorama.com/images/Large/SOWH1000XM4S_2.JPG");
+
+        REAL_PRODUCT_IMAGES.put("Sony WH-1000XM4", new RealImages(
+                "https://techbuzzireland.com/wp-content/uploads/2021/04/wh-1000xm4_white_with_case2-large.jpg",
+                sonyWH1000XM4Colors
+        ));
+
+        Map<String, String> iPad9thGen64GBColors = new LinkedHashMap<>();
+        iPad9thGen64GBColors.put("Noir", "https://www.att.com/scmsassets/global/devices/tablets/apple/apple-ipad-9th-generation-2021/defaultimage/space-gray-hero-zoom.png");
+        iPad9thGen64GBColors.put("Blanc", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTR4LNibURuqHHT_BWZWAyaLMdzLWM6sgBeXZ9TY1G8yg&s=10");
+        iPad9thGen64GBColors.put("Bleu", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSq02f2zk2C8AaQfp-OEBWpOB_2h3T892bJA56orh7W3Q&s");
+        iPad9thGen64GBColors.put("Gris sidéral", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT1cy88UDu72fKCYZGVsf-R_Ubjym3lx2hQZ_GE7aGwhtTiScssNXDDWvM7&s=10");
+
+        REAL_PRODUCT_IMAGES.put("iPad 9th Gen 64GB", new RealImages(
+                "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSq02f2zk2C8AaQfp-OEBWpOB_2h3T892bJA56orh7W3Q&s",
+                iPad9thGen64GBColors
+        ));
+
+        Map<String, String> googlePixel6Colors = new LinkedHashMap<>();
+        googlePixel6Colors.put("Noir", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSrgcvhv5PpisYlHZOdpK2IcTQGmucz9RFmsFOLENUcqw&s=10");
+        googlePixel6Colors.put("Blanc", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQKf2NFXTR-2BdVSuQSXYtkdWsrlmFUVtKox0-pM0iZDg&s=10");
+        googlePixel6Colors.put("Bleu", "https://i0.wp.com/telefonat.ma/wp-content/uploads/2025/08/Google-Pixel-10.jpg");
+        googlePixel6Colors.put("Gris sidéral", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSiv_f4ulc_DTJFicpZ3j5TStuA5LYhWzQHZqH2XWUcVV593VA5g0CGwGi2&s=10");
+
+        REAL_PRODUCT_IMAGES.put("Google Pixel 10 ", new RealImages(
+                "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcThUW1EDHwVQ2YbsgTWOtXGZ1m_hvya0CYaz_uSvnPIxA&s=10",
+                googlePixel6Colors
+        ));
+
+
+        // TODO Hajar : complète pour les 7 autres produits (mêmes noms exacts
+        // que dans seedProductsAndUnits ci-dessus) :
+        // "Samsung Galaxy S21", "MacBook Air M1", "Dell XPS 13", "AirPods Pro",
+        // "Sony WH-1000XM4", "iPad 9th Gen 64GB", "Google Pixel 6"
+    }
+
+    private Map<String, String> mergeWithPlaceholderFallback(String productName, Map<String, String> realColorImages) {
+        Map<String, String> merged = new LinkedHashMap<>();
+        COLOR_PALETTE.forEach((color, hexes) -> {
+            String real = realColorImages.get(color);
+            merged.put(color, real != null ? real : placeholderImage(productName + " — " + color, hexes[0], hexes[1]));
+        });
+        return merged;
     }
 
     /**

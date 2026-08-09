@@ -27,6 +27,12 @@ public class OrderController {
         return ResponseEntity.ok(orderService.getOrder(id, principal));
     }
 
+    /** Paiement simulé — voir OrderService#confirmPayment. */
+    @PostMapping("/{id}/confirm-payment")
+    public ResponseEntity<OrderDTO> confirmPayment(@AuthenticationPrincipal UserPrincipal principal, @PathVariable Long id) {
+        return ResponseEntity.ok(orderService.confirmPayment(id, principal));
+    }
+
     @GetMapping("/user/{userId}")
     public ResponseEntity<PageResponse<OrderDTO>> getOrdersForUser(@AuthenticationPrincipal UserPrincipal principal,
                                                             @PathVariable Long userId, Pageable pageable) {

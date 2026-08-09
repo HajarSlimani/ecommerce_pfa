@@ -27,7 +27,7 @@ export default function CartSummary({ total, disabled }) {
 
     checkout.mutate(undefined, {
       onSuccess: (order) => {
-        toast.success('Commande confirmée')
+        toast.success('Commande enregistrée')
         navigate(`/orders/confirmation/${order.id}`)
       },
       onError: (err) => {

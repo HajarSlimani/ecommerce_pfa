@@ -29,3 +29,14 @@ export function useOrder(orderId) {
     enabled: !!orderId,
   })
 }
+
+export function useConfirmPayment() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: orderApi.confirmPayment,
+    onSuccess: (order) => {
+      queryClient.invalidateQueries({ queryKey: ['order', order.id] })
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+    },
+  })
+}
