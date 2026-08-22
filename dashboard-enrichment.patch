@@ -1,0 +1,845 @@
+diff --git a/backend/src/main/java/com/ecommerce/auth/UserRepository.java b/backend/src/main/java/com/ecommerce/auth/UserRepository.java
+index 31132f0..b0bc0ec 100644
+--- a/backend/src/main/java/com/ecommerce/auth/UserRepository.java
++++ b/backend/src/main/java/com/ecommerce/auth/UserRepository.java
+@@ -2,9 +2,11 @@ package com.ecommerce.auth;
+ 
+ import org.springframework.data.jpa.repository.JpaRepository;
+ 
++import java.time.Instant;
+ import java.util.Optional;
+ 
+ public interface UserRepository extends JpaRepository<User, Long> {
+     Optional<User> findByEmail(String email);
+     boolean existsByEmail(String email);
++    long countByCreatedAtBetween(Instant from, Instant to);
+ }
+diff --git a/backend/src/main/java/com/ecommerce/catalogue/repository/ProductUnitRepository.java b/backend/src/main/java/com/ecommerce/catalogue/repository/ProductUnitRepository.java
+index edbd608..9c9f55b 100644
+--- a/backend/src/main/java/com/ecommerce/catalogue/repository/ProductUnitRepository.java
++++ b/backend/src/main/java/com/ecommerce/catalogue/repository/ProductUnitRepository.java
+@@ -65,4 +65,25 @@ public interface ProductUnitRepository extends JpaRepository<ProductUnit, Long>
+         Grade getGrade();
+         String getColor();
+     }
++
++    /**
++     * Produits dont le stock disponible (tous grades/couleurs confondus) est
++     * à ou sous le seuil donné — alimente l'alerte "stock faible" du
++     * dashboard admin.
++     */
++    @Query("""
++            SELECT u.product.id AS productId, u.product.name AS productName, COUNT(u) AS availableUnits
++            FROM ProductUnit u
++            WHERE u.status = 'AVAILABLE'
++            GROUP BY u.product.id, u.product.name
++            HAVING COUNT(u) <= :threshold
++            ORDER BY COUNT(u) ASC
++            """)
++    List<LowStockProjection> findLowStock(@Param("threshold") long threshold);
++
++    interface LowStockProjection {
++        Long getProductId();
++        String getProductName();
++        Long getAvailableUnits();
++    }
+ }
+diff --git a/backend/src/main/java/com/ecommerce/commande/repository/OrderItemRepository.java b/backend/src/main/java/com/ecommerce/commande/repository/OrderItemRepository.java
+index c32c6e1..25a80ae 100644
+--- a/backend/src/main/java/com/ecommerce/commande/repository/OrderItemRepository.java
++++ b/backend/src/main/java/com/ecommerce/commande/repository/OrderItemRepository.java
+@@ -1,7 +1,51 @@
+ package com.ecommerce.commande.repository;
+ 
+ import com.ecommerce.commande.entity.OrderItem;
++import com.ecommerce.common.enums.OrderStatus;
++import org.springframework.data.domain.Pageable;
+ import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.repository.query.Param;
++
++import java.math.BigDecimal;
++import java.util.List;
+ 
+ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
++
++    /**
++     * Uniquement les commandes réellement payées (:statuses) — une commande
++     * PENDING n'a pas encore été payée, une CANCELLED a vu son stock restauré,
++     * ni l'une ni l'autre ne doit compter comme une "vente".
++     */
++    @Query("""
++            SELECT oi.productId AS productId, oi.productName AS productName,
++                   COUNT(oi) AS unitsSold, SUM(oi.priceAtPurchase) AS revenue
++            FROM OrderItem oi
++            WHERE oi.order.status IN :statuses
++            GROUP BY oi.productId, oi.productName
++            ORDER BY COUNT(oi) DESC
++            """)
++    List<TopProductProjection> findTopProducts(@Param("statuses") List<OrderStatus> statuses, Pageable pageable);
++
++    @Query("""
++            SELECT p.category AS category, COUNT(oi) AS unitsSold, SUM(oi.priceAtPurchase) AS revenue
++            FROM OrderItem oi JOIN com.ecommerce.catalogue.entity.Product p ON p.id = oi.productId
++            WHERE oi.order.status IN :statuses
++            GROUP BY p.category
++            ORDER BY SUM(oi.priceAtPurchase) DESC
++            """)
++    List<CategorySalesProjection> findSalesByCategory(@Param("statuses") List<OrderStatus> statuses);
++
++    interface TopProductProjection {
++        Long getProductId();
++        String getProductName();
++        Long getUnitsSold();
++        BigDecimal getRevenue();
++    }
++
++    interface CategorySalesProjection {
++        String getCategory();
++        Long getUnitsSold();
++        BigDecimal getRevenue();
++    }
+ }
+diff --git a/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java b/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java
+index 451479d..3312334 100644
+--- a/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java
++++ b/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java
+@@ -1,9 +1,16 @@
+ package com.ecommerce.commande.repository;
+ 
+ import com.ecommerce.commande.entity.Order;
++import com.ecommerce.common.enums.OrderStatus;
+ import org.springframework.data.domain.Page;
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.repository.query.Param;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.util.List;
+ 
+ public interface OrderRepository extends JpaRepository<Order, Long> {
+     Page<Order> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
+@@ -11,5 +18,11 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
+     /** Vue admin : toutes les commandes, tous utilisateurs confondus. */
+     Page<Order> findAllByOrderByCreatedAtDesc(Pageable pageable);
+ 
+-    long countByStatus(com.ecommerce.common.enums.OrderStatus status);
++    long countByStatus(OrderStatus status);
++
++    long countByCreatedAtBetween(Instant from, Instant to);
++
++    @Query("SELECT COALESCE(SUM(o.total), 0) FROM Order o WHERE o.status IN :statuses AND o.createdAt BETWEEN :from AND :to")
++    BigDecimal sumRevenueBetween(@Param("statuses") List<OrderStatus> statuses,
++                                  @Param("from") Instant from, @Param("to") Instant to);
+ }
+diff --git a/backend/src/main/java/com/ecommerce/common/controller/AdminStatsController.java b/backend/src/main/java/com/ecommerce/common/controller/AdminStatsController.java
+index 6d62668..839d298 100644
+--- a/backend/src/main/java/com/ecommerce/common/controller/AdminStatsController.java
++++ b/backend/src/main/java/com/ecommerce/common/controller/AdminStatsController.java
+@@ -1,14 +1,20 @@
+ package com.ecommerce.common.controller;
+ 
+ import com.ecommerce.common.dto.AdminStatsDTO;
++import com.ecommerce.common.dto.CategorySalesDTO;
++import com.ecommerce.common.dto.LowStockProductDTO;
++import com.ecommerce.common.dto.TopProductDTO;
+ import com.ecommerce.common.service.AdminStatsService;
+ import lombok.RequiredArgsConstructor;
+ import org.springframework.http.ResponseEntity;
+ import org.springframework.security.access.prepost.PreAuthorize;
+ import org.springframework.web.bind.annotation.GetMapping;
+ import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RequestParam;
+ import org.springframework.web.bind.annotation.RestController;
+ 
++import java.util.List;
++
+ @RestController
+ @RequestMapping("/api/admin/stats")
+ @PreAuthorize("hasRole('ADMIN')")
+@@ -21,4 +27,21 @@ public class AdminStatsController {
+     public ResponseEntity<AdminStatsDTO> getStats() {
+         return ResponseEntity.ok(adminStatsService.getStats());
+     }
++
++    @GetMapping("/low-stock")
++    public ResponseEntity<List<LowStockProductDTO>> getLowStock(
++            @RequestParam(defaultValue = "3") long threshold) {
++        return ResponseEntity.ok(adminStatsService.getLowStock(threshold));
++    }
++
++    @GetMapping("/top-products")
++    public ResponseEntity<List<TopProductDTO>> getTopProducts(
++            @RequestParam(defaultValue = "5") int limit) {
++        return ResponseEntity.ok(adminStatsService.getTopProducts(limit));
++    }
++
++    @GetMapping("/sales-by-category")
++    public ResponseEntity<List<CategorySalesDTO>> getSalesByCategory() {
++        return ResponseEntity.ok(adminStatsService.getSalesByCategory());
++    }
+ }
+diff --git a/backend/src/main/java/com/ecommerce/common/dto/AdminStatsDTO.java b/backend/src/main/java/com/ecommerce/common/dto/AdminStatsDTO.java
+index b81d1e5..7a3b434 100644
+--- a/backend/src/main/java/com/ecommerce/common/dto/AdminStatsDTO.java
++++ b/backend/src/main/java/com/ecommerce/common/dto/AdminStatsDTO.java
+@@ -4,6 +4,9 @@ import lombok.AllArgsConstructor;
+ import lombok.Builder;
+ import lombok.Getter;
+ 
++import java.math.BigDecimal;
++import java.util.Map;
++
+ @Getter
+ @Builder
+ @AllArgsConstructor
+@@ -12,4 +15,18 @@ public class AdminStatsDTO {
+     private long totalOrders;
+     private long pendingOrders;
+     private long totalUsers;
++    private BigDecimal totalRevenue;
++
++    /**
++     * Variation en % vs les 7 jours précédents (semaine N-1). Null si la
++     * semaine précédente n'a aucune donnée (division par zéro évitée plutôt
++     * que d'afficher un pourcentage absurde de type "+∞%") — le front
++     * affiche alors "Nouveau" plutôt qu'un chiffre.
++     */
++    private Double revenueTrendPct;
++    private Double ordersTrendPct;
++    private Double usersTrendPct;
++
++    /** Nombre de commandes par statut (PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED). */
++    private Map<String, Long> ordersByStatus;
+ }
+diff --git a/backend/src/main/java/com/ecommerce/common/dto/CategorySalesDTO.java b/backend/src/main/java/com/ecommerce/common/dto/CategorySalesDTO.java
+new file mode 100644
+index 0000000..93ee003
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/common/dto/CategorySalesDTO.java
+@@ -0,0 +1,16 @@
++package com.ecommerce.common.dto;
++
++import lombok.AllArgsConstructor;
++import lombok.Builder;
++import lombok.Getter;
++
++import java.math.BigDecimal;
++
++@Getter
++@Builder
++@AllArgsConstructor
++public class CategorySalesDTO {
++    private String category;
++    private long unitsSold;
++    private BigDecimal revenue;
++}
+diff --git a/backend/src/main/java/com/ecommerce/common/dto/LowStockProductDTO.java b/backend/src/main/java/com/ecommerce/common/dto/LowStockProductDTO.java
+new file mode 100644
+index 0000000..d8ccd66
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/common/dto/LowStockProductDTO.java
+@@ -0,0 +1,14 @@
++package com.ecommerce.common.dto;
++
++import lombok.AllArgsConstructor;
++import lombok.Builder;
++import lombok.Getter;
++
++@Getter
++@Builder
++@AllArgsConstructor
++public class LowStockProductDTO {
++    private Long productId;
++    private String productName;
++    private long availableUnits;
++}
+diff --git a/backend/src/main/java/com/ecommerce/common/dto/TopProductDTO.java b/backend/src/main/java/com/ecommerce/common/dto/TopProductDTO.java
+new file mode 100644
+index 0000000..42d7980
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/common/dto/TopProductDTO.java
+@@ -0,0 +1,17 @@
++package com.ecommerce.common.dto;
++
++import lombok.AllArgsConstructor;
++import lombok.Builder;
++import lombok.Getter;
++
++import java.math.BigDecimal;
++
++@Getter
++@Builder
++@AllArgsConstructor
++public class TopProductDTO {
++    private Long productId;
++    private String productName;
++    private long unitsSold;
++    private BigDecimal revenue;
++}
+diff --git a/backend/src/main/java/com/ecommerce/common/service/AdminStatsService.java b/backend/src/main/java/com/ecommerce/common/service/AdminStatsService.java
+index 7b40098..dc56843 100644
+--- a/backend/src/main/java/com/ecommerce/common/service/AdminStatsService.java
++++ b/backend/src/main/java/com/ecommerce/common/service/AdminStatsService.java
+@@ -2,32 +2,118 @@ package com.ecommerce.common.service;
+ 
+ import com.ecommerce.auth.UserRepository;
+ import com.ecommerce.catalogue.repository.ProductRepository;
++import com.ecommerce.catalogue.repository.ProductUnitRepository;
++import com.ecommerce.commande.repository.OrderItemRepository;
+ import com.ecommerce.commande.repository.OrderRepository;
+ import com.ecommerce.common.dto.AdminStatsDTO;
++import com.ecommerce.common.dto.CategorySalesDTO;
++import com.ecommerce.common.dto.LowStockProductDTO;
++import com.ecommerce.common.dto.TopProductDTO;
+ import com.ecommerce.common.enums.OrderStatus;
+ import lombok.RequiredArgsConstructor;
++import org.springframework.data.domain.PageRequest;
+ import org.springframework.stereotype.Service;
+ 
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.time.temporal.ChronoUnit;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++
+ /**
+- * Compteurs simples pour le tableau de bord admin (vue générale, distincte
+- * de la page "Pricing Dynamique" qui, elle, montre l'impact du moteur de
+- * pricing). Traverse plusieurs modules (catalogue/commande/auth), d'où sa
+- * place ici plutôt que dans un des services métier existants.
++ * Statistiques du tableau de bord admin (vue générale, distincte de la page
++ * "Pricing Dynamique" qui montre l'impact du moteur de pricing). Traverse
++ * plusieurs modules (catalogue/commande/auth), d'où sa place ici plutôt que
++ * dans un des services métier existants.
++ *
++ * Une commande n'est comptée comme "vente" (revenu, top produits, ventes par
++ * catégorie) que si son statut est dans PAID_STATUSES — une commande PENDING
++ * n'a pas encore été payée, une CANCELLED a vu son stock restauré, ni l'une
++ * ni l'autre ne représente une vente réelle.
+  */
+ @Service
+ @RequiredArgsConstructor
+ public class AdminStatsService {
+ 
++    private static final List<OrderStatus> PAID_STATUSES =
++            List.of(OrderStatus.CONFIRMED, OrderStatus.SHIPPED, OrderStatus.DELIVERED);
++
+     private final ProductRepository productRepository;
++    private final ProductUnitRepository productUnitRepository;
+     private final OrderRepository orderRepository;
++    private final OrderItemRepository orderItemRepository;
+     private final UserRepository userRepository;
+ 
+     public AdminStatsDTO getStats() {
++        Instant now = Instant.now();
++        Instant weekAgo = now.minus(7, ChronoUnit.DAYS);
++        Instant twoWeeksAgo = now.minus(14, ChronoUnit.DAYS);
++
++        BigDecimal revenueThisWeek = orderRepository.sumRevenueBetween(PAID_STATUSES, weekAgo, now);
++        BigDecimal revenueLastWeek = orderRepository.sumRevenueBetween(PAID_STATUSES, twoWeeksAgo, weekAgo);
++        long ordersThisWeek = orderRepository.countByCreatedAtBetween(weekAgo, now);
++        long ordersLastWeek = orderRepository.countByCreatedAtBetween(twoWeeksAgo, weekAgo);
++        long usersThisWeek = userRepository.countByCreatedAtBetween(weekAgo, now);
++        long usersLastWeek = userRepository.countByCreatedAtBetween(twoWeeksAgo, weekAgo);
++
++        Map<String, Long> ordersByStatus = new LinkedHashMap<>();
++        for (OrderStatus status : OrderStatus.values()) {
++            ordersByStatus.put(status.name(), orderRepository.countByStatus(status));
++        }
++
+         return AdminStatsDTO.builder()
+                 .totalProducts(productRepository.count())
+                 .totalOrders(orderRepository.count())
+                 .pendingOrders(orderRepository.countByStatus(OrderStatus.PENDING))
+                 .totalUsers(userRepository.count())
++                .totalRevenue(orderRepository.sumRevenueBetween(PAID_STATUSES, Instant.EPOCH, now))
++                .revenueTrendPct(trendPct(revenueLastWeek, revenueThisWeek))
++                .ordersTrendPct(trendPct(BigDecimal.valueOf(ordersLastWeek), BigDecimal.valueOf(ordersThisWeek)))
++                .usersTrendPct(trendPct(BigDecimal.valueOf(usersLastWeek), BigDecimal.valueOf(usersThisWeek)))
++                .ordersByStatus(ordersByStatus)
+                 .build();
+     }
++
++    /** Null si pas de base de comparaison (évite un "+∞%" absurde). */
++    private Double trendPct(BigDecimal previous, BigDecimal current) {
++        if (previous == null || previous.signum() == 0) {
++            return null;
++        }
++        return current.subtract(previous)
++                .divide(previous, 4, java.math.RoundingMode.HALF_UP)
++                .multiply(BigDecimal.valueOf(100))
++                .doubleValue();
++    }
++
++    public List<LowStockProductDTO> getLowStock(long threshold) {
++        return productUnitRepository.findLowStock(threshold).stream()
++                .map(p -> LowStockProductDTO.builder()
++                        .productId(p.getProductId())
++                        .productName(p.getProductName())
++                        .availableUnits(p.getAvailableUnits())
++                        .build())
++                .toList();
++    }
++
++    public List<TopProductDTO> getTopProducts(int limit) {
++        return orderItemRepository.findTopProducts(PAID_STATUSES, PageRequest.of(0, limit)).stream()
++                .map(p -> TopProductDTO.builder()
++                        .productId(p.getProductId())
++                        .productName(p.getProductName())
++                        .unitsSold(p.getUnitsSold())
++                        .revenue(p.getRevenue())
++                        .build())
++                .toList();
++    }
++
++    public List<CategorySalesDTO> getSalesByCategory() {
++        return orderItemRepository.findSalesByCategory(PAID_STATUSES).stream()
++                .map(c -> CategorySalesDTO.builder()
++                        .category(c.getCategory())
++                        .unitsSold(c.getUnitsSold())
++                        .revenue(c.getRevenue())
++                        .build())
++                .toList();
++    }
+ }
+diff --git a/frontend/src/api/adminApi.js b/frontend/src/api/adminApi.js
+index 669ecc5..67b63cb 100644
+--- a/frontend/src/api/adminApi.js
++++ b/frontend/src/api/adminApi.js
+@@ -2,6 +2,11 @@ import axiosInstance from './axiosInstance'
+ 
+ export const adminApi = {
+   getStats: () => axiosInstance.get('/admin/stats').then((r) => r.data),
++  getLowStock: (threshold = 3) =>
++    axiosInstance.get('/admin/stats/low-stock', { params: { threshold } }).then((r) => r.data),
++  getTopProducts: (limit = 5) =>
++    axiosInstance.get('/admin/stats/top-products', { params: { limit } }).then((r) => r.data),
++  getSalesByCategory: () => axiosInstance.get('/admin/stats/sales-by-category').then((r) => r.data),
+   getUsers: ({ page = 0, size = 20 } = {}) =>
+     axiosInstance.get('/admin/users', { params: { page, size } }).then((r) => r.data),
+ }
+diff --git a/frontend/src/components/admin/KpiCard.jsx b/frontend/src/components/admin/KpiCard.jsx
+index 249cc1f..a5efb65 100644
+--- a/frontend/src/components/admin/KpiCard.jsx
++++ b/frontend/src/components/admin/KpiCard.jsx
+@@ -1,14 +1,40 @@
+-export default function KpiCard({ label, value, accent = 'ink' }) {
++import { ArrowUp, ArrowDown } from 'lucide-react'
++
++/**
++ * `trend` : variation en % vs la semaine précédente, ou `undefined`/`null`
++ * si pas de base de comparaison (le backend renvoie null plutôt qu'un
++ * "+∞%" quand la semaine précédente n'a aucune donnée) — dans ce cas on
++ * affiche juste rien plutôt qu'un chiffre trompeur.
++ */
++export default function KpiCard({ label, value, accent = 'ink', trend }) {
+   const accentClasses = {
+     ink: 'text-ink',
+     up: 'text-deal-up',
+     down: 'text-deal-down',
+   }
+ 
++  const hasTrend = trend !== undefined && trend !== null
++  const isPositive = trend > 0
++  // deal-down (vert) / deal-up (rouge) sont nommés pour les variations de
++  // PRIX (baisse = bonne affaire), mais ici on les réutilise simplement
++  // comme "positif = vert, négatif = rouge" pour une tendance business.
++
+   return (
+     <div className="border border-line bg-surface p-5">
+       <div className="eyebrow">{label}</div>
+-      <div className={`tabular-price mt-3 font-display text-2xl font-medium ${accentClasses[accent]}`}>{value}</div>
++      <div className="mt-3 flex items-end justify-between gap-2">
++        <div className={`tabular-price font-display text-2xl font-medium ${accentClasses[accent]}`}>{value}</div>
++        {hasTrend && (
++          <div
++            className={`mb-1 flex items-center gap-0.5 text-xs font-medium ${
++              isPositive ? 'text-deal-down' : 'text-deal-up'
++            }`}
++          >
++            {isPositive ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
++            {Math.abs(trend).toFixed(1)}%
++          </div>
++        )}
++      </div>
+     </div>
+   )
+ }
+diff --git a/frontend/src/components/admin/LowStockAlert.jsx b/frontend/src/components/admin/LowStockAlert.jsx
+new file mode 100644
+index 0000000..e6b0662
+--- /dev/null
++++ b/frontend/src/components/admin/LowStockAlert.jsx
+@@ -0,0 +1,32 @@
++import { Link } from 'react-router-dom'
++import { AlertTriangle } from 'lucide-react'
++
++export default function LowStockAlert({ products }) {
++  return (
++    <div className="border border-line bg-surface p-5">
++      <div className="flex items-center gap-2">
++        <AlertTriangle size={14} className="text-deal-up" />
++        <p className="eyebrow">Stock faible</p>
++      </div>
++
++      {products.length === 0 ? (
++        <p className="mt-4 text-sm text-ink-soft">Tous les produits ont un stock suffisant.</p>
++      ) : (
++        <div className="mt-4 flex flex-col">
++          {products.map((p) => (
++            <Link
++              key={p.productId}
++              to={`/admin/products?q=${encodeURIComponent(p.productName)}`}
++              className="flex items-center justify-between border-b border-line py-2.5 text-sm last:border-b-0 hover:text-brand-600"
++            >
++              <span className="truncate text-ink">{p.productName}</span>
++              <span className="font-mono text-xs text-deal-up">
++                {p.availableUnits} unité{p.availableUnits > 1 ? 's' : ''}
++              </span>
++            </Link>
++          ))}
++        </div>
++      )}
++    </div>
++  )
++}
+diff --git a/frontend/src/components/admin/OrderStatusBreakdown.jsx b/frontend/src/components/admin/OrderStatusBreakdown.jsx
+new file mode 100644
+index 0000000..4a5a5bd
+--- /dev/null
++++ b/frontend/src/components/admin/OrderStatusBreakdown.jsx
+@@ -0,0 +1,33 @@
++import { ORDER_STATUS } from '../../constants/orderStatus'
++
++export default function OrderStatusBreakdown({ counts }) {
++  const total = Object.values(counts || {}).reduce((sum, n) => sum + n, 0)
++
++  return (
++    <div className="border border-line bg-surface p-5">
++      <p className="eyebrow">Commandes par statut</p>
++
++      {total === 0 ? (
++        <p className="mt-4 text-sm text-ink-soft">Aucune commande pour l’instant.</p>
++      ) : (
++        <div className="mt-4 flex flex-col gap-3">
++          {Object.entries(counts).map(([status, count]) => {
++            const meta = ORDER_STATUS[status] || { label: status, className: 'text-ink-soft' }
++            const pct = total > 0 ? (count / total) * 100 : 0
++            return (
++              <div key={status}>
++                <div className="mb-1 flex items-center justify-between text-xs">
++                  <span className={`font-medium uppercase tracking-wide ${meta.className}`}>{meta.label}</span>
++                  <span className="text-ink-soft">{count}</span>
++                </div>
++                <div className="h-1.5 w-full bg-surface-sunken">
++                  <div className="h-full bg-ink" style={{ width: `${pct}%` }} />
++                </div>
++              </div>
++            )
++          })}
++        </div>
++      )}
++    </div>
++  )
++}
+diff --git a/frontend/src/components/admin/RecentOrders.jsx b/frontend/src/components/admin/RecentOrders.jsx
+new file mode 100644
+index 0000000..a839bdb
+--- /dev/null
++++ b/frontend/src/components/admin/RecentOrders.jsx
+@@ -0,0 +1,41 @@
++import { Link } from 'react-router-dom'
++import { ORDER_STATUS } from '../../constants/orderStatus'
++import { formatDate } from '../../utils/formatDate'
++import PriceTag from '../common/PriceTag'
++
++export default function RecentOrders({ orders }) {
++  return (
++    <div className="border border-line bg-surface p-5">
++      <div className="flex items-center justify-between">
++        <p className="eyebrow">Commandes récentes</p>
++        <Link to="/admin/orders" className="text-xs text-ink-soft transition hover:text-ink">
++          Voir tout →
++        </Link>
++      </div>
++
++      {orders.length === 0 ? (
++        <p className="mt-4 text-sm text-ink-soft">Aucune commande pour l’instant.</p>
++      ) : (
++        <div className="mt-4 flex flex-col">
++          {orders.map((order) => {
++            const status = ORDER_STATUS[order.status] || { label: order.status, className: 'text-ink-soft' }
++            return (
++              <div key={order.id} className="flex items-center justify-between border-b border-line py-2.5 text-sm last:border-b-0">
++                <div>
++                  <span className="font-mono text-ink">#{order.id}</span>
++                  <span className="ml-2 truncate text-xs text-ink-soft">{order.userEmail}</span>
++                </div>
++                <div className="flex items-center gap-4">
++                  <span className={`text-xs font-medium uppercase tracking-wide ${status.className}`}>
++                    {status.label}
++                  </span>
++                  <PriceTag price={order.total} size="sm" />
++                </div>
++              </div>
++            )
++          })}
++        </div>
++      )}
++    </div>
++  )
++}
+diff --git a/frontend/src/components/admin/RecentUsers.jsx b/frontend/src/components/admin/RecentUsers.jsx
+new file mode 100644
+index 0000000..518bab7
+--- /dev/null
++++ b/frontend/src/components/admin/RecentUsers.jsx
+@@ -0,0 +1,28 @@
++import { Link } from 'react-router-dom'
++import { formatDate } from '../../utils/formatDate'
++
++export default function RecentUsers({ users }) {
++  return (
++    <div className="border border-line bg-surface p-5">
++      <div className="flex items-center justify-between">
++        <p className="eyebrow">Utilisateurs récents</p>
++        <Link to="/admin/users" className="text-xs text-ink-soft transition hover:text-ink">
++          Voir tout →
++        </Link>
++      </div>
++
++      {users.length === 0 ? (
++        <p className="mt-4 text-sm text-ink-soft">Aucun utilisateur.</p>
++      ) : (
++        <div className="mt-4 flex flex-col">
++          {users.map((u) => (
++            <div key={u.id} className="flex items-center justify-between border-b border-line py-2.5 text-sm last:border-b-0">
++              <span className="truncate text-ink">{u.email}</span>
++              <span className="shrink-0 text-xs text-ink-soft">{formatDate(u.createdAt)}</span>
++            </div>
++          ))}
++        </div>
++      )}
++    </div>
++  )
++}
+diff --git a/frontend/src/components/admin/SalesByCategory.jsx b/frontend/src/components/admin/SalesByCategory.jsx
+new file mode 100644
+index 0000000..003b21a
+--- /dev/null
++++ b/frontend/src/components/admin/SalesByCategory.jsx
+@@ -0,0 +1,34 @@
++import { CATEGORIES } from '../../constants/catalogue'
++import PriceTag from '../common/PriceTag'
++
++export default function SalesByCategory({ data }) {
++  const maxRevenue = Math.max(...data.map((d) => Number(d.revenue)), 1)
++
++  return (
++    <div className="border border-line bg-surface p-5">
++      <p className="eyebrow">Ventes par catégorie</p>
++
++      {data.length === 0 ? (
++        <p className="mt-4 text-sm text-ink-soft">Pas encore de vente confirmée.</p>
++      ) : (
++        <div className="mt-4 flex flex-col gap-3">
++          {data.map((c) => {
++            const label = CATEGORIES.find((cat) => cat.id === c.category)?.label || c.category
++            const pct = (Number(c.revenue) / maxRevenue) * 100
++            return (
++              <div key={c.category}>
++                <div className="mb-1 flex items-center justify-between text-xs">
++                  <span className="text-ink">{label}</span>
++                  <PriceTag price={c.revenue} size="sm" />
++                </div>
++                <div className="h-1.5 w-full bg-surface-sunken">
++                  <div className="h-full bg-brand-500" style={{ width: `${pct}%` }} />
++                </div>
++              </div>
++            )
++          })}
++        </div>
++      )}
++    </div>
++  )
++}
+diff --git a/frontend/src/components/admin/TopProductsTable.jsx b/frontend/src/components/admin/TopProductsTable.jsx
+new file mode 100644
+index 0000000..cb66622
+--- /dev/null
++++ b/frontend/src/components/admin/TopProductsTable.jsx
+@@ -0,0 +1,31 @@
++import PriceTag from '../common/PriceTag'
++
++export default function TopProductsTable({ products }) {
++  return (
++    <div className="border border-line bg-surface p-5">
++      <p className="eyebrow">Top produits vendus</p>
++
++      {products.length === 0 ? (
++        <p className="mt-4 text-sm text-ink-soft">Pas encore de vente confirmée.</p>
++      ) : (
++        <div className="mt-4">
++          <div className="grid grid-cols-[1fr_80px_100px] gap-3 border-b border-line pb-2 text-xs font-medium uppercase tracking-wide text-ink-soft">
++            <span>Produit</span>
++            <span>Vendus</span>
++            <span>Revenu</span>
++          </div>
++          {products.map((p) => (
++            <div
++              key={p.productId}
++              className="grid grid-cols-[1fr_80px_100px] items-center gap-3 border-b border-line py-2.5 text-sm last:border-b-0"
++            >
++              <span className="truncate text-ink">{p.productName}</span>
++              <span className="font-mono text-xs text-ink-soft">{p.unitsSold}</span>
++              <PriceTag price={p.revenue} size="sm" />
++            </div>
++          ))}
++        </div>
++      )}
++    </div>
++  )
++}
+diff --git a/frontend/src/hooks/useAdmin.js b/frontend/src/hooks/useAdmin.js
+index db78a4f..c2ae7f5 100644
+--- a/frontend/src/hooks/useAdmin.js
++++ b/frontend/src/hooks/useAdmin.js
+@@ -12,6 +12,43 @@ export function useAdminStats() {
+   })
+ }
+ 
++export function useLowStock(threshold = 3) {
++  return useQuery({
++    queryKey: ['adminLowStock', threshold],
++    queryFn: () => adminApi.getLowStock(threshold),
++  })
++}
++
++export function useTopProducts(limit = 5) {
++  return useQuery({
++    queryKey: ['adminTopProducts', limit],
++    queryFn: () => adminApi.getTopProducts(limit),
++  })
++}
++
++export function useSalesByCategory() {
++  return useQuery({
++    queryKey: ['adminSalesByCategory'],
++    queryFn: adminApi.getSalesByCategory,
++  })
++}
++
++// Aperçus "récents" pour le dashboard — réutilisent les mêmes endpoints que
++// les pages Commandes/Utilisateurs, juste avec une taille de page réduite.
++export function useRecentOrders(limit = 5) {
++  return useQuery({
++    queryKey: ['adminOrders', 'recent', limit],
++    queryFn: () => orderApi.adminGetAll({ page: 0, size: limit }),
++  })
++}
++
++export function useRecentUsers(limit = 5) {
++  return useQuery({
++    queryKey: ['adminUsers', 'recent', limit],
++    queryFn: () => adminApi.getUsers({ page: 0, size: limit }),
++  })
++}
++
+ export function useAdminUsers(page = 0) {
+   return useQuery({
+     queryKey: ['adminUsers', page],
+diff --git a/frontend/src/pages/admin/AdminDashboardPage.jsx b/frontend/src/pages/admin/AdminDashboardPage.jsx
+index 4c64185..17b3124 100644
+--- a/frontend/src/pages/admin/AdminDashboardPage.jsx
++++ b/frontend/src/pages/admin/AdminDashboardPage.jsx
+@@ -1,11 +1,29 @@
+-import { Link } from 'react-router-dom'
+-import { useAdminStats } from '../../hooks/useAdmin'
++import {
++  useAdminStats,
++  useLowStock,
++  useTopProducts,
++  useSalesByCategory,
++  useRecentOrders,
++  useRecentUsers,
++} from '../../hooks/useAdmin'
++import { formatCurrency } from '../../utils/formatCurrency'
+ import KpiCard from '../../components/admin/KpiCard'
++import OrderStatusBreakdown from '../../components/admin/OrderStatusBreakdown'
++import LowStockAlert from '../../components/admin/LowStockAlert'
++import TopProductsTable from '../../components/admin/TopProductsTable'
++import SalesByCategory from '../../components/admin/SalesByCategory'
++import RecentOrders from '../../components/admin/RecentOrders'
++import RecentUsers from '../../components/admin/RecentUsers'
+ import LoadingSpinner from '../../components/common/LoadingSpinner'
+ import ErrorBanner from '../../components/common/ErrorBanner'
+ 
+ export default function AdminDashboardPage() {
+   const { data: stats, isLoading, isError } = useAdminStats()
++  const { data: lowStock } = useLowStock(3)
++  const { data: topProducts } = useTopProducts(5)
++  const { data: categorySales } = useSalesByCategory()
++  const { data: recentOrders } = useRecentOrders(5)
++  const { data: recentUsers } = useRecentUsers(5)
+ 
+   return (
+     <div>
+@@ -16,26 +34,35 @@ export default function AdminDashboardPage() {
+       {isError && <div className="mt-8"><ErrorBanner message="Impossible de charger les statistiques." /></div>}
+ 
+       {stats && (
+-        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+-          <KpiCard label="Produits" value={stats.totalProducts} />
+-          <KpiCard label="Commandes" value={stats.totalOrders} />
+-          <KpiCard
+-            label="Commandes en attente"
+-            value={stats.pendingOrders}
+-            accent={stats.pendingOrders > 0 ? 'up' : 'ink'}
+-          />
+-          <KpiCard label="Utilisateurs" value={stats.totalUsers} />
+-        </div>
+-      )}
++        <>
++          <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
++            <KpiCard label="Produits" value={stats.totalProducts} />
++            <KpiCard label="Revenu total" value={formatCurrency(stats.totalRevenue)} trend={stats.revenueTrendPct} />
++            <KpiCard label="Commandes" value={stats.totalOrders} trend={stats.ordersTrendPct} />
++            <KpiCard
++              label="Commandes en attente"
++              value={stats.pendingOrders}
++              accent={stats.pendingOrders > 0 ? 'up' : 'ink'}
++            />
++            <KpiCard label="Utilisateurs" value={stats.totalUsers} trend={stats.usersTrendPct} />
++          </div>
++
++          <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
++            <OrderStatusBreakdown counts={stats.ordersByStatus} />
++            {lowStock && <LowStockAlert products={lowStock} />}
++            {recentUsers && <RecentUsers users={recentUsers.content} />}
++          </div>
+ 
+-      <div className="mt-10 flex flex-wrap gap-4 text-sm">
+-        <Link to="/admin/pricing-dynamique" className="text-ink-soft underline transition hover:text-ink">
+-          Voir l’impact du pricing dynamique →
+-        </Link>
+-        <Link to="/admin/orders" className="text-ink-soft underline transition hover:text-ink">
+-          Gérer les commandes →
+-        </Link>
+-      </div>
++          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
++            {topProducts && <TopProductsTable products={topProducts} />}
++            {categorySales && <SalesByCategory data={categorySales} />}
++          </div>
++
++          <div className="mt-4">
++            {recentOrders && <RecentOrders orders={recentOrders.content} />}
++          </div>
++        </>
++      )}
+     </div>
+   )
+ }

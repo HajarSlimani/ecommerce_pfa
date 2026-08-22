@@ -65,4 +65,25 @@ public interface ProductUnitRepository extends JpaRepository<ProductUnit, Long> 
         Grade getGrade();
         String getColor();
     }
+
+    /**
+     * Produits dont le stock disponible (tous grades/couleurs confondus) est
+     * à ou sous le seuil donné — alimente l'alerte "stock faible" du
+     * dashboard admin.
+     */
+    @Query("""
+            SELECT u.product.id AS productId, u.product.name AS productName, COUNT(u) AS availableUnits
+            FROM ProductUnit u
+            WHERE u.status = 'AVAILABLE'
+            GROUP BY u.product.id, u.product.name
+            HAVING COUNT(u) <= :threshold
+            ORDER BY COUNT(u) ASC
+            """)
+    List<LowStockProjection> findLowStock(@Param("threshold") long threshold);
+
+    interface LowStockProjection {
+        Long getProductId();
+        String getProductName();
+        Long getAvailableUnits();
+    }
 }

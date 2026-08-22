@@ -12,6 +12,43 @@ export function useAdminStats() {
   })
 }
 
+export function useLowStock(threshold = 3) {
+  return useQuery({
+    queryKey: ['adminLowStock', threshold],
+    queryFn: () => adminApi.getLowStock(threshold),
+  })
+}
+
+export function useTopProducts(limit = 5) {
+  return useQuery({
+    queryKey: ['adminTopProducts', limit],
+    queryFn: () => adminApi.getTopProducts(limit),
+  })
+}
+
+export function useSalesByCategory() {
+  return useQuery({
+    queryKey: ['adminSalesByCategory'],
+    queryFn: adminApi.getSalesByCategory,
+  })
+}
+
+// Aperçus "récents" pour le dashboard — réutilisent les mêmes endpoints que
+// les pages Commandes/Utilisateurs, juste avec une taille de page réduite.
+export function useRecentOrders(limit = 5) {
+  return useQuery({
+    queryKey: ['adminOrders', 'recent', limit],
+    queryFn: () => orderApi.adminGetAll({ page: 0, size: limit }),
+  })
+}
+
+export function useRecentUsers(limit = 5) {
+  return useQuery({
+    queryKey: ['adminUsers', 'recent', limit],
+    queryFn: () => adminApi.getUsers({ page: 0, size: limit }),
+  })
+}
+
 export function useAdminUsers(page = 0) {
   return useQuery({
     queryKey: ['adminUsers', page],

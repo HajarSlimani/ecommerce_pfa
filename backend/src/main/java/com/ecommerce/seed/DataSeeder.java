@@ -387,7 +387,7 @@ public class DataSeeder implements CommandLineRunner {
         iphone13Colors.put("Blanc", "https://uno.ma/pub/media/catalog/product/cache/af8d7fd2c4634f9c922fba76a4a30c04/l/d/ld0006166728.jpg");
         iphone13Colors.put("Bleu", "https://imagedelivery.net/AZ5kNEcp8roCR6XQJU10qQ/aa54b976-3f1d-4fa3-45ae-53753d1a3f00/w=800,h=800,fit=crop");
         iphone13Colors.put("Gris sidéral", "https://http2.mlstatic.com/D_Q_NP_655013-MLA99442466886_112025-O.webp");
-        // TODO Hajar : ajoute "Bleu" et "Gris sidéral" ici avec tes propres URLs.
+       
 
         REAL_PRODUCT_IMAGES.put("iPhone 13 128GB", new RealImages(
                 "https://uno.ma/pub/media/catalog/product/cache/af8d7fd2c4634f9c922fba76a4a30c04/l/d/ld0006166728.jpg",
@@ -467,16 +467,12 @@ public class DataSeeder implements CommandLineRunner {
         googlePixel6Colors.put("Bleu", "https://i0.wp.com/telefonat.ma/wp-content/uploads/2025/08/Google-Pixel-10.jpg");
         googlePixel6Colors.put("Gris sidéral", "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSiv_f4ulc_DTJFicpZ3j5TStuA5LYhWzQHZqH2XWUcVV593VA5g0CGwGi2&s=10");
 
-        REAL_PRODUCT_IMAGES.put("Google Pixel 10 ", new RealImages(
-                "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcThUW1EDHwVQ2YbsgTWOtXGZ1m_hvya0CYaz_uSvnPIxA&s=10",
+        REAL_PRODUCT_IMAGES.put("Google Pixel 10", new RealImages(
+                "https://i0.wp.com/telefonat.ma/wp-content/uploads/2025/08/Google-Pixel-10.jpg",
                 googlePixel6Colors
         ));
 
 
-        // TODO Hajar : complète pour les 7 autres produits (mêmes noms exacts
-        // que dans seedProductsAndUnits ci-dessus) :
-        // "Samsung Galaxy S21", "MacBook Air M1", "Dell XPS 13", "AirPods Pro",
-        // "Sony WH-1000XM4", "iPad 9th Gen 64GB", "Google Pixel 6"
     }
 
     private Map<String, String> mergeWithPlaceholderFallback(String productName, Map<String, String> realColorImages) {
