@@ -1,0 +1,383 @@
+diff --git a/backend/src/main/java/com/ecommerce/auth/AdminUserController.java b/backend/src/main/java/com/ecommerce/auth/AdminUserController.java
+index 14b2d7c..581e0a2 100644
+--- a/backend/src/main/java/com/ecommerce/auth/AdminUserController.java
++++ b/backend/src/main/java/com/ecommerce/auth/AdminUserController.java
+@@ -1,20 +1,16 @@
+ package com.ecommerce.auth;
+ 
++import com.ecommerce.auth.dto.UpdateUserRequest;
+ import com.ecommerce.auth.dto.UserDTO;
+ import com.ecommerce.common.dto.PageResponse;
++import jakarta.validation.Valid;
+ import lombok.RequiredArgsConstructor;
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.http.ResponseEntity;
+ import org.springframework.security.access.prepost.PreAuthorize;
+-import org.springframework.web.bind.annotation.GetMapping;
+-import org.springframework.web.bind.annotation.RequestMapping;
+-import org.springframework.web.bind.annotation.RestController;
++import org.springframework.security.core.annotation.AuthenticationPrincipal;
++import org.springframework.web.bind.annotation.*;
+ 
+-/**
+- * Lecture seule pour l'instant (voir UserController pour la gestion de son
+- * propre profil) — pas d'action de promotion/rétrogradation de rôle demandée
+- * pour cette passe.
+- */
+ @RestController
+ @RequestMapping("/api/admin/users")
+ @PreAuthorize("hasRole('ADMIN')")
+@@ -27,4 +23,18 @@ public class AdminUserController {
+     public ResponseEntity<PageResponse<UserDTO>> getAllUsers(Pageable pageable) {
+         return ResponseEntity.ok(userService.getAllUsers(pageable));
+     }
++
++    @PatchMapping("/{id}")
++    public ResponseEntity<UserDTO> updateUser(@AuthenticationPrincipal UserPrincipal principal,
++                                               @PathVariable Long id,
++                                               @Valid @RequestBody UpdateUserRequest request) {
++        return ResponseEntity.ok(userService.updateUser(principal.getId(), id, request));
++    }
++
++    @DeleteMapping("/{id}")
++    public ResponseEntity<Void> deleteUser(@AuthenticationPrincipal UserPrincipal principal,
++                                            @PathVariable Long id) {
++        userService.deleteUser(principal.getId(), id);
++        return ResponseEntity.noContent().build();
++    }
+ }
+diff --git a/backend/src/main/java/com/ecommerce/auth/UserService.java b/backend/src/main/java/com/ecommerce/auth/UserService.java
+index c692443..5473993 100644
+--- a/backend/src/main/java/com/ecommerce/auth/UserService.java
++++ b/backend/src/main/java/com/ecommerce/auth/UserService.java
+@@ -2,9 +2,13 @@ package com.ecommerce.auth;
+ 
+ import com.ecommerce.auth.dto.ChangePasswordRequest;
+ import com.ecommerce.auth.dto.UpdateProfileRequest;
++import com.ecommerce.auth.dto.UpdateUserRequest;
+ import com.ecommerce.auth.dto.UserDTO;
++import com.ecommerce.commande.repository.OrderRepository;
++import com.ecommerce.common.enums.Role;
+ import com.ecommerce.common.exception.BadRequestException;
+ import com.ecommerce.common.exception.ResourceNotFoundException;
++import com.ecommerce.panier.repository.CartRepository;
+ import lombok.RequiredArgsConstructor;
+ import org.springframework.security.crypto.password.PasswordEncoder;
+ import org.springframework.stereotype.Service;
+@@ -15,17 +19,59 @@ import org.springframework.transaction.annotation.Transactional;
+ public class UserService {
+ 
+     private final UserRepository userRepository;
++    private final OrderRepository orderRepository;
++    private final CartRepository cartRepository;
+     private final PasswordEncoder passwordEncoder;
+ 
+     public UserDTO getProfile(Long userId) {
+         return toDTO(findUser(userId));
+     }
+ 
+-    /** Vue admin : liste de tous les utilisateurs (lecture seule pour l'instant). */
++    /** Vue admin : liste de tous les utilisateurs. */
+     public com.ecommerce.common.dto.PageResponse<UserDTO> getAllUsers(org.springframework.data.domain.Pageable pageable) {
+         return com.ecommerce.common.dto.PageResponse.from(userRepository.findAll(pageable), this::toDTO);
+     }
+ 
++    /**
++     * Édition admin (nom + rôle) d'un autre utilisateur. Un admin ne peut
++     * pas se rétrograder lui-même — sinon un admin seul sur le système
++     * pourrait accidentellement se couper l'accès au panel admin.
++     */
++    @Transactional
++    public UserDTO updateUser(Long adminId, Long targetUserId, UpdateUserRequest request) {
++        if (adminId.equals(targetUserId) && request.getRole() != Role.ADMIN) {
++            throw new BadRequestException("Vous ne pouvez pas retirer votre propre rôle admin");
++        }
++
++        User user = findUser(targetUserId);
++        user.setFullName(request.getFullName());
++        user.setRole(request.getRole());
++        return toDTO(userRepository.save(user));
++    }
++
++    /**
++     * Suppression admin. Deux garde-fous : impossible de se supprimer
++     * soi-même, et impossible de supprimer un utilisateur qui a des
++     * commandes (ça casserait l'historique). Le panier (s'il existe) est
++     * bien supprimé, lui, puisqu'il n'a aucune valeur historique.
++     */
++    @Transactional
++    public void deleteUser(Long adminId, Long targetUserId) {
++        if (adminId.equals(targetUserId)) {
++            throw new BadRequestException("Vous ne pouvez pas supprimer votre propre compte");
++        }
++
++        User user = findUser(targetUserId);
++
++        if (orderRepository.countByUserId(targetUserId) > 0) {
++            throw new BadRequestException(
++                    "Impossible de supprimer un utilisateur ayant des commandes — ça casserait l'historique");
++        }
++
++        cartRepository.findByUserId(targetUserId).ifPresent(cartRepository::delete);
++        userRepository.delete(user);
++    }
++
+     @Transactional
+     public UserDTO updateProfile(Long userId, UpdateProfileRequest request) {
+         User user = findUser(userId);
+diff --git a/backend/src/main/java/com/ecommerce/auth/dto/UpdateUserRequest.java b/backend/src/main/java/com/ecommerce/auth/dto/UpdateUserRequest.java
+new file mode 100644
+index 0000000..fc0b999
+--- /dev/null
++++ b/backend/src/main/java/com/ecommerce/auth/dto/UpdateUserRequest.java
+@@ -0,0 +1,25 @@
++package com.ecommerce.auth.dto;
++
++import com.ecommerce.common.enums.Role;
++import jakarta.validation.constraints.NotBlank;
++import jakarta.validation.constraints.NotNull;
++import lombok.Getter;
++import lombok.Setter;
++
++/**
++ * Édition admin d'un autre utilisateur — email volontairement absent (comme
++ * pour UpdateProfileRequest) : c'est l'identifiant de connexion, le changer
++ * demanderait une revérification qu'on n'a pas. Ici en plus le rôle, qui n'a
++ * de sens que côté admin (voir UserService#updateUser pour les garde-fous
++ * contre l'auto-rétrogradation).
++ */
++@Getter
++@Setter
++public class UpdateUserRequest {
++
++    @NotBlank
++    private String fullName;
++
++    @NotNull
++    private Role role;
++}
+diff --git a/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java b/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java
+index 3312334..8fa8e75 100644
+--- a/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java
++++ b/backend/src/main/java/com/ecommerce/commande/repository/OrderRepository.java
+@@ -22,6 +22,9 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
+ 
+     long countByCreatedAtBetween(Instant from, Instant to);
+ 
++    /** Utilisé pour bloquer la suppression d'un utilisateur ayant des commandes. */
++    long countByUserId(Long userId);
++
+     @Query("SELECT COALESCE(SUM(o.total), 0) FROM Order o WHERE o.status IN :statuses AND o.createdAt BETWEEN :from AND :to")
+     BigDecimal sumRevenueBetween(@Param("statuses") List<OrderStatus> statuses,
+                                   @Param("from") Instant from, @Param("to") Instant to);
+diff --git a/frontend/src/api/adminApi.js b/frontend/src/api/adminApi.js
+index 67b63cb..ab2b7cc 100644
+--- a/frontend/src/api/adminApi.js
++++ b/frontend/src/api/adminApi.js
+@@ -9,4 +9,6 @@ export const adminApi = {
+   getSalesByCategory: () => axiosInstance.get('/admin/stats/sales-by-category').then((r) => r.data),
+   getUsers: ({ page = 0, size = 20 } = {}) =>
+     axiosInstance.get('/admin/users', { params: { page, size } }).then((r) => r.data),
++  updateUser: (id, data) => axiosInstance.patch(`/admin/users/${id}`, data).then((r) => r.data),
++  deleteUser: (id) => axiosInstance.delete(`/admin/users/${id}`).then((r) => r.data),
+ }
+diff --git a/frontend/src/components/admin/AdminUserRow.jsx b/frontend/src/components/admin/AdminUserRow.jsx
+new file mode 100644
+index 0000000..c91134d
+--- /dev/null
++++ b/frontend/src/components/admin/AdminUserRow.jsx
+@@ -0,0 +1,113 @@
++import { useState } from 'react'
++import toast from 'react-hot-toast'
++import { Pencil, Trash2, Check, X } from 'lucide-react'
++import { formatDate } from '../../utils/formatDate'
++import { useUpdateUser, useDeleteUser } from '../../hooks/useAdmin'
++
++export default function AdminUserRow({ user, isSelf }) {
++  const [isEditing, setIsEditing] = useState(false)
++  const [confirmingDelete, setConfirmingDelete] = useState(false)
++  const [fullName, setFullName] = useState(user.fullName || '')
++  const [role, setRole] = useState(user.role)
++
++  const updateUser = useUpdateUser()
++  const deleteUser = useDeleteUser()
++
++  const handleSave = () => {
++    updateUser.mutate(
++      { id: user.id, data: { fullName, role } },
++      {
++        onSuccess: () => {
++          toast.success('Utilisateur mis à jour')
++          setIsEditing(false)
++        },
++        onError: (err) => toast.error(err.response?.data?.message || 'Échec de la mise à jour'),
++      }
++    )
++  }
++
++  const handleCancel = () => {
++    setFullName(user.fullName || '')
++    setRole(user.role)
++    setIsEditing(false)
++  }
++
++  const handleDelete = () => {
++    deleteUser.mutate(user.id, {
++      onSuccess: () => toast.success('Utilisateur supprimé'),
++      onError: (err) => {
++        toast.error(err.response?.data?.message || 'Échec de la suppression')
++        setConfirmingDelete(false)
++      },
++    })
++  }
++
++  if (isEditing) {
++    return (
++      <div className="grid grid-cols-[1fr_1fr_100px_140px_90px] items-center gap-4 border-b border-line bg-surface-muted px-4 py-3 text-sm last:border-b-0">
++        <span className="truncate text-ink-soft">{user.email}</span>
++        <input
++          value={fullName}
++          onChange={(e) => setFullName(e.target.value)}
++          className="border border-line bg-surface px-2 py-1 text-sm text-ink outline-none focus:border-ink"
++        />
++        <select
++          value={role}
++          disabled={isSelf}
++          title={isSelf ? 'Tu ne peux pas retirer ton propre rôle admin' : undefined}
++          onChange={(e) => setRole(e.target.value)}
++          className="border border-line bg-surface px-2 py-1 text-xs uppercase tracking-wide text-ink outline-none focus:border-ink disabled:opacity-50"
++        >
++          <option value="CLIENT">Client</option>
++          <option value="ADMIN">Admin</option>
++        </select>
++        <span className="text-xs text-ink-soft">{formatDate(user.createdAt)}</span>
++        <div className="flex items-center gap-2">
++          <button onClick={handleSave} disabled={updateUser.isPending} aria-label="Enregistrer" className="text-deal-down">
++            <Check size={16} />
++          </button>
++          <button onClick={handleCancel} aria-label="Annuler" className="text-ink-soft hover:text-ink">
++            <X size={16} />
++          </button>
++        </div>
++      </div>
++    )
++  }
++
++  return (
++    <div className="grid grid-cols-[1fr_1fr_100px_140px_90px] items-center gap-4 border-b border-line px-4 py-3 text-sm last:border-b-0">
++      <span className="truncate text-ink">{user.email}</span>
++      <span className="truncate text-ink-soft">{user.fullName || '—'}</span>
++      <span className={`text-xs font-medium uppercase tracking-wide ${user.role === 'ADMIN' ? 'text-brand-600' : 'text-ink-soft'}`}>
++        {user.role === 'ADMIN' ? 'Admin' : 'Client'}
++      </span>
++      <span className="text-xs text-ink-soft">{formatDate(user.createdAt)}</span>
++
++      {confirmingDelete ? (
++        <div className="flex items-center gap-2 text-xs">
++          <button onClick={handleDelete} disabled={deleteUser.isPending} className="font-medium text-deal-up">
++            Confirmer
++          </button>
++          <button onClick={() => setConfirmingDelete(false)} className="text-ink-soft hover:text-ink">
++            Annuler
++          </button>
++        </div>
++      ) : (
++        <div className="flex items-center gap-3">
++          <button onClick={() => setIsEditing(true)} aria-label="Modifier" className="text-ink-soft hover:text-ink">
++            <Pencil size={14} />
++          </button>
++          <button
++            onClick={() => setConfirmingDelete(true)}
++            disabled={isSelf}
++            title={isSelf ? 'Tu ne peux pas supprimer ton propre compte' : undefined}
++            aria-label="Supprimer"
++            className="text-ink-soft hover:text-deal-up disabled:opacity-30"
++          >
++            <Trash2 size={14} />
++          </button>
++        </div>
++      )}
++    </div>
++  )
++}
+diff --git a/frontend/src/hooks/useAdmin.js b/frontend/src/hooks/useAdmin.js
+index c2ae7f5..d75a819 100644
+--- a/frontend/src/hooks/useAdmin.js
++++ b/frontend/src/hooks/useAdmin.js
+@@ -57,6 +57,22 @@ export function useAdminUsers(page = 0) {
+   })
+ }
+ 
++export function useUpdateUser() {
++  const queryClient = useQueryClient()
++  return useMutation({
++    mutationFn: ({ id, data }) => adminApi.updateUser(id, data),
++    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['adminUsers'] }),
++  })
++}
++
++export function useDeleteUser() {
++  const queryClient = useQueryClient()
++  return useMutation({
++    mutationFn: adminApi.deleteUser,
++    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['adminUsers'] }),
++  })
++}
++
+ // --- Produits ---
+ 
+ export function useUpdateProduct() {
+diff --git a/frontend/src/pages/admin/AdminUsersPage.jsx b/frontend/src/pages/admin/AdminUsersPage.jsx
+index d5622a1..f7de421 100644
+--- a/frontend/src/pages/admin/AdminUsersPage.jsx
++++ b/frontend/src/pages/admin/AdminUsersPage.jsx
+@@ -1,6 +1,7 @@
+ import { useState } from 'react'
+ import { useAdminUsers } from '../../hooks/useAdmin'
+-import { formatDate } from '../../utils/formatDate'
++import { useAuth } from '../../hooks/useAuth'
++import AdminUserRow from '../../components/admin/AdminUserRow'
+ import Pagination from '../../components/common/Pagination'
+ import LoadingSpinner from '../../components/common/LoadingSpinner'
+ import ErrorBanner from '../../components/common/ErrorBanner'
+@@ -8,6 +9,7 @@ import ErrorBanner from '../../components/common/ErrorBanner'
+ export default function AdminUsersPage() {
+   const [page, setPage] = useState(0)
+   const { data, isLoading, isError } = useAdminUsers(page)
++  const { user: currentUser } = useAuth()
+ 
+   return (
+     <div>
+@@ -19,29 +21,16 @@ export default function AdminUsersPage() {
+ 
+       {data && (
+         <div className="mt-8 border border-line bg-surface">
+-          <div className="grid grid-cols-[1fr_1fr_100px_140px] gap-4 border-b border-line px-4 py-3 text-xs font-medium uppercase tracking-wide text-ink-soft">
++          <div className="grid grid-cols-[1fr_1fr_100px_140px_90px] gap-4 border-b border-line px-4 py-3 text-xs font-medium uppercase tracking-wide text-ink-soft">
+             <span>Email</span>
+             <span>Nom</span>
+             <span>Rôle</span>
+             <span>Inscrit le</span>
++            <span>Actions</span>
+           </div>
+ 
+           {data.content.map((u) => (
+-            <div
+-              key={u.id}
+-              className="grid grid-cols-[1fr_1fr_100px_140px] items-center gap-4 border-b border-line px-4 py-3 text-sm last:border-b-0"
+-            >
+-              <span className="truncate text-ink">{u.email}</span>
+-              <span className="truncate text-ink-soft">{u.fullName || '—'}</span>
+-              <span
+-                className={`text-xs font-medium uppercase tracking-wide ${
+-                  u.role === 'ADMIN' ? 'text-brand-600' : 'text-ink-soft'
+-                }`}
+-              >
+-                {u.role === 'ADMIN' ? 'Admin' : 'Client'}
+-              </span>
+-              <span className="text-xs text-ink-soft">{formatDate(u.createdAt)}</span>
+-            </div>
++            <AdminUserRow key={u.id} user={u} isSelf={u.id === currentUser?.userId} />
+           ))}
+ 
+           {data.content.length === 0 && (

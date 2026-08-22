@@ -22,6 +22,9 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     long countByCreatedAtBetween(Instant from, Instant to);
 
+    /** Utilisé pour bloquer la suppression d'un utilisateur ayant des commandes. */
+    long countByUserId(Long userId);
+
     @Query("SELECT COALESCE(SUM(o.total), 0) FROM Order o WHERE o.status IN :statuses AND o.createdAt BETWEEN :from AND :to")
     BigDecimal sumRevenueBetween(@Param("statuses") List<OrderStatus> statuses,
                                   @Param("from") Instant from, @Param("to") Instant to);

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAdminUsers } from '../../hooks/useAdmin'
-import { formatDate } from '../../utils/formatDate'
+import { useAuth } from '../../hooks/useAuth'
+import AdminUserRow from '../../components/admin/AdminUserRow'
 import Pagination from '../../components/common/Pagination'
 import LoadingSpinner from '../../components/common/LoadingSpinner'
 import ErrorBanner from '../../components/common/ErrorBanner'
@@ -8,6 +9,7 @@ import ErrorBanner from '../../components/common/ErrorBanner'
 export default function AdminUsersPage() {
   const [page, setPage] = useState(0)
   const { data, isLoading, isError } = useAdminUsers(page)
+  const { user: currentUser } = useAuth()
 
   return (
     <div>
@@ -19,29 +21,16 @@ export default function AdminUsersPage() {
 
       {data && (
         <div className="mt-8 border border-line bg-surface">
-          <div className="grid grid-cols-[1fr_1fr_100px_140px] gap-4 border-b border-line px-4 py-3 text-xs font-medium uppercase tracking-wide text-ink-soft">
+          <div className="grid grid-cols-[1fr_1fr_100px_140px_90px] gap-4 border-b border-line px-4 py-3 text-xs font-medium uppercase tracking-wide text-ink-soft">
             <span>Email</span>
             <span>Nom</span>
             <span>Rôle</span>
             <span>Inscrit le</span>
+            <span>Actions</span>
           </div>
 
           {data.content.map((u) => (
-            <div
-              key={u.id}
-              className="grid grid-cols-[1fr_1fr_100px_140px] items-center gap-4 border-b border-line px-4 py-3 text-sm last:border-b-0"
-            >
-              <span className="truncate text-ink">{u.email}</span>
-              <span className="truncate text-ink-soft">{u.fullName || '—'}</span>
-              <span
-                className={`text-xs font-medium uppercase tracking-wide ${
-                  u.role === 'ADMIN' ? 'text-brand-600' : 'text-ink-soft'
-                }`}
-              >
-                {u.role === 'ADMIN' ? 'Admin' : 'Client'}
-              </span>
-              <span className="text-xs text-ink-soft">{formatDate(u.createdAt)}</span>
-            </div>
+            <AdminUserRow key={u.id} user={u} isSelf={u.id === currentUser?.userId} />
           ))}
 
           {data.content.length === 0 && (

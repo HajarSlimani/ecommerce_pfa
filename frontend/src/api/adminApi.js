@@ -9,4 +9,6 @@ export const adminApi = {
   getSalesByCategory: () => axiosInstance.get('/admin/stats/sales-by-category').then((r) => r.data),
   getUsers: ({ page = 0, size = 20 } = {}) =>
     axiosInstance.get('/admin/users', { params: { page, size } }).then((r) => r.data),
+  updateUser: (id, data) => axiosInstance.patch(`/admin/users/${id}`, data).then((r) => r.data),
+  deleteUser: (id) => axiosInstance.delete(`/admin/users/${id}`).then((r) => r.data),
 }

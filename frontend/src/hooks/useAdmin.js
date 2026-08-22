@@ -57,6 +57,22 @@ export function useAdminUsers(page = 0) {
   })
 }
 
+export function useUpdateUser() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }) => adminApi.updateUser(id, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['adminUsers'] }),
+  })
+}
+
+export function useDeleteUser() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: adminApi.deleteUser,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['adminUsers'] }),
+  })
+}
+
 // --- Produits ---
 
 export function useUpdateProduct() {
