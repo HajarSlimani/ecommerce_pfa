@@ -25,4 +25,10 @@ public class AuthController {
                                                @RequestHeader(value = GUEST_HEADER, required = false) String guestCartId) {
         return ResponseEntity.ok(authService.login(request, guestCartId));
     }
+
+    @PostMapping("/google")
+    public ResponseEntity<AuthResponse> loginWithGoogle(@Valid @RequestBody GoogleLoginRequest request,
+                                                         @RequestHeader(value = GUEST_HEADER, required = false) String guestCartId) {
+        return ResponseEntity.ok(authService.loginWithGoogle(request, guestCartId));
+    }
 }

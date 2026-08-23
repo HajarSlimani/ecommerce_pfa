@@ -90,6 +90,27 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Connexion Google : vérification serveur des ID tokens émis par Google Identity Services -->
+        <dependency>
+            <groupId>com.google.api-client</groupId>
+            <artifactId>google-api-client</artifactId>
+            <version>2.7.0</version>
+        </dependency>
+
+        <!--
+            Charge un fichier .env (à la racine de backend/, à côté de pom.xml)
+            dans l'Environment de Spring — les ${VAR:default} déjà présents
+            dans application.yml (JWT_SECRET, GOOGLE_CLIENT_ID, etc.) le
+            résolvent alors automatiquement depuis .env, sans avoir besoin
+            d'exporter de vraies variables d'environnement système à la main.
+            Zéro changement de code nécessaire ailleurs.
+        -->
+        <dependency>
+            <groupId>me.paulschwarz</groupId>
+            <artifactId>spring-dotenv</artifactId>
+            <version>4.0.0</version>
+        </dependency>
+
         <!-- Utils -->
         <dependency>
             <groupId>org.projectlombok</groupId>

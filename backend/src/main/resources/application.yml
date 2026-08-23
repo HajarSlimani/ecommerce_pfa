@@ -36,6 +36,12 @@ app:
     secret: ${JWT_SECRET:changeMeInProdWithAVeryLongRandomSecretKeyPlease123456789}
     expiration-ms: 86400000   # 24h
 
+  google:
+    # Client ID OAuth 2.0 (type "Web application") créé dans Google Cloud
+    # Console → APIs & Services → Credentials. C'est un identifiant PUBLIC
+    # (pas un secret) : il est aussi utilisé côté frontend (VITE_GOOGLE_CLIENT_ID).
+    client-id: ${GOOGLE_CLIENT_ID:}
+
   pricing-service:
     base-url: ${PRICING_SERVICE_URL:http://localhost:8000}
     timeout-ms: 5000

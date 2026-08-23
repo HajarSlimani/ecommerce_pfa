@@ -32,6 +32,12 @@ export function AuthProvider({ children }) {
     return res
   }, [])
 
+  const loginWithGoogle = useCallback(async (idToken) => {
+    const res = await authApi.googleLogin(idToken)
+    persist(res)
+    return res
+  }, [])
+
   const register = useCallback(async (data) => {
     const res = await authApi.register(data)
     persist(res)
@@ -48,7 +54,7 @@ export function AuthProvider({ children }) {
   const isAuthenticated = !!user
 
   return (
-    <AuthContext.Provider value={{ user, isAdmin, isAuthenticated, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isAdmin, isAuthenticated, login, loginWithGoogle, register, logout }}>
       {children}
     </AuthContext.Provider>
   )

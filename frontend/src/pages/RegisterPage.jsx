@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
+import GoogleSignInButton from '../components/auth/GoogleSignInButton'
 
 export default function RegisterPage() {
   const { register } = useAuth()
@@ -76,6 +77,14 @@ export default function RegisterPage() {
           {isSubmitting ? 'Création…' : 'Créer mon compte'}
         </button>
       </form>
+
+      <div className="my-6 flex items-center gap-3">
+        <div className="h-px flex-1 bg-line" />
+        <span className="text-xs text-ink-soft">ou</span>
+        <div className="h-px flex-1 bg-line" />
+      </div>
+
+      <GoogleSignInButton />
 
       <p className="mt-6 text-center text-sm text-ink-soft">
         Déjà un compte ?{' '}
