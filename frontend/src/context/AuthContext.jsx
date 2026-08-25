@@ -18,6 +18,7 @@ export function AuthProvider({ children }) {
       email: authResponse.email,
       role: authResponse.role,
       userId: claims?.userId ?? null,
+      emailVerified: claims?.emailVerified ?? authResponse.emailVerified ?? false,
     }
     localStorage.setItem('user', JSON.stringify(userData))
     setUser(userData)
@@ -50,11 +51,22 @@ export function AuthProvider({ children }) {
     setUser(null)
   }, [])
 
+  // Après une vérification d'email réussie, on met juste à jour l'état
+  // local (pas besoin de se reconnecter pour rafraîchir le JWT).
+  const markEmailVerified = useCallback(() => {
+    setUser((prev) => {
+      if (!prev) return prev
+      const updated = { ...prev, emailVerified: true }
+      localStorage.setItem('user', JSON.stringify(updated))
+      return updated
+    })
+  }, [])
+
   const isAdmin = user?.role === 'ADMIN'
   const isAuthenticated = !!user
 
   return (
-    <AuthContext.Provider value={{ user, isAdmin, isAuthenticated, login, loginWithGoogle, register, logout }}>
+    <AuthContext.Provider value={{ user, isAdmin, isAuthenticated, login, loginWithGoogle, register, logout, markEmailVerified }}>
       {children}
     </AuthContext.Provider>
   )

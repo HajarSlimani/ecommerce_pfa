@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.*;
 public class UserController {
 
     private final UserService userService;
+    private final AuthService authService;
 
     @GetMapping
     public ResponseEntity<UserDTO> getProfile(@AuthenticationPrincipal UserPrincipal principal) {
@@ -36,6 +37,12 @@ public class UserController {
     public ResponseEntity<Void> changePassword(@AuthenticationPrincipal UserPrincipal principal,
                                                 @Valid @RequestBody ChangePasswordRequest request) {
         userService.changePassword(principal.getId(), request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/resend-verification")
+    public ResponseEntity<Void> resendVerification(@AuthenticationPrincipal UserPrincipal principal) {
+        authService.resendVerification(principal.getId());
         return ResponseEntity.noContent().build();
     }
 }

@@ -20,4 +20,5 @@ public class UserDTO {
     private String fullName;
     private Role role;
     private Instant createdAt;
+    private boolean emailVerified;
 }

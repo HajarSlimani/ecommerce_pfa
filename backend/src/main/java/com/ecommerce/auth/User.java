@@ -34,4 +34,15 @@ public class User {
 
     @Builder.Default
     private Instant createdAt = Instant.now();
+
+    /**
+     * "columnDefinition" (pas juste @Builder.Default) : on veut que la
+     * colonne ait un DEFAULT false au niveau base, pas seulement en Java —
+     * sinon les lignes existantes (créées avant l'ajout de ce champ)
+     * récupèrent NULL lors de l'ALTER TABLE, ce qui casserait la logique
+     * "email non vérifié" pour tous les comptes déjà en base.
+     */
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    @Builder.Default
+    private boolean emailVerified = false;
 }

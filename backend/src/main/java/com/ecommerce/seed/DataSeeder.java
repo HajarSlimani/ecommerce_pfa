@@ -100,6 +100,7 @@ public class DataSeeder implements CommandLineRunner {
                         .password(passwordEncoder.encode("admin123"))
                         .fullName("Admin Démo")
                         .role(Role.ADMIN)
+                        .emailVerified(true)
                         .build()));
 
         userRepository.findByEmail("client@test.com").orElseGet(() ->
@@ -108,6 +109,7 @@ public class DataSeeder implements CommandLineRunner {
                         .password(passwordEncoder.encode("client123"))
                         .fullName("Client Démo")
                         .role(Role.CLIENT)
+                        .emailVerified(true)
                         .build()));
 
         log.info("Utilisateurs créés : admin@test.com / admin123, client@test.com / client123");

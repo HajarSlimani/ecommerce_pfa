@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Routes, Route, useLocation } from 'react-router-dom'
 import Navbar from '../components/common/Navbar'
 import Footer from '../components/common/Footer'
+import EmailVerificationBanner from '../components/common/EmailVerificationBanner'
 import ProtectedRoute from '../components/common/ProtectedRoute'
 import AdminRoute from '../components/common/AdminRoute'
 
@@ -14,6 +15,9 @@ import OrderHistoryPage from '../pages/OrderHistoryPage'
 import ProfilePage from '../pages/ProfilePage'
 import LoginPage from '../pages/LoginPage'
 import RegisterPage from '../pages/RegisterPage'
+import ForgotPasswordPage from '../pages/ForgotPasswordPage'
+import ResetPasswordPage from '../pages/ResetPasswordPage'
+import VerifyEmailPage from '../pages/VerifyEmailPage'
 
 import AdminLayout from '../pages/admin/AdminLayout'
 import AdminDashboardPage from '../pages/admin/AdminDashboardPage'
@@ -61,6 +65,7 @@ export default function AppRouter() {
       <ScrollManager />
       {!isAdminRoute && <Navbar />}
       <div className={`flex-1 ${needsTopPadding ? 'pt-20' : ''}`}>
+        {needsTopPadding && <EmailVerificationBanner />}
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/boutique" element={<ShopPage />} />
@@ -68,6 +73,9 @@ export default function AppRouter() {
           <Route path="/cart" element={<CartPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
 
           <Route element={<ProtectedRoute />}>
             <Route path="/orders" element={<OrderHistoryPage />} />

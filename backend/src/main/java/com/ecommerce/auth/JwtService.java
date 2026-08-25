@@ -31,6 +31,7 @@ public class JwtService {
         if (userDetails instanceof UserPrincipal principal) {
             claims.put("role", principal.getUser().getRole().name());
             claims.put("userId", principal.getId());
+            claims.put("emailVerified", principal.getUser().isEmailVerified());
         }
         return buildToken(claims, userDetails.getUsername());
     }

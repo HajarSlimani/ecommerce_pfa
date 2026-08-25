@@ -26,6 +26,23 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
 
+  # Vérification d'email + mot de passe oublié. Valeurs par défaut = Mailtrap
+  # (service gratuit de test SMTP, capture les emails sans les envoyer à de
+  # vraies boîtes — pratique pour développer/démontrer sans spammer
+  # personne). Crée un compte sur mailtrap.io → Sandbox → SMTP Settings pour
+  # récupérer tes identifiants.
+  mail:
+    host: ${SMTP_HOST:sandbox.smtp.mailtrap.io}
+    port: ${SMTP_PORT:2525}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
   cache:
     type: redis
     redis:
@@ -41,6 +58,13 @@ app:
     # Console → APIs & Services → Credentials. C'est un identifiant PUBLIC
     # (pas un secret) : il est aussi utilisé côté frontend (VITE_GOOGLE_CLIENT_ID).
     client-id: ${GOOGLE_CLIENT_ID:}
+
+  mail:
+    from: ${MAIL_FROM:no-reply@newdevshop.local}
+
+  # Utilisé pour construire les liens de vérification/réinitialisation
+  # envoyés par email (ex. http://localhost:5173/verify-email?token=...).
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
 
   pricing-service:
     base-url: ${PRICING_SERVICE_URL:http://localhost:8000}

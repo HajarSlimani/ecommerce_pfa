@@ -103,6 +103,7 @@ public class UserService {
                 .fullName(user.getFullName())
                 .role(user.getRole())
                 .createdAt(user.getCreatedAt())
+                .emailVerified(user.isEmailVerified())
                 .build();
     }
 }

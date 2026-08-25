@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import toast from 'react-hot-toast'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, CheckCircle2, CircleAlert } from 'lucide-react'
 import { useProfile, useUpdateProfile, useChangePassword } from '../hooks/useProfile'
+import { authApi } from '../api/authApi'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorBanner from '../components/common/ErrorBanner'
 
@@ -22,6 +23,19 @@ export default function ProfilePage() {
 
   const [passwords, setPasswords] = useState({ current: '', next: '', confirm: '' })
   const [showPasswords, setShowPasswords] = useState(false)
+  const [isResending, setIsResending] = useState(false)
+
+  const handleResendVerification = async () => {
+    setIsResending(true)
+    try {
+      await authApi.resendVerification()
+      toast.success('Email de vérification renvoyé')
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Échec de l’envoi')
+    } finally {
+      setIsResending(false)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -93,7 +107,27 @@ export default function ProfilePage() {
         <div className="flex flex-col gap-1.5">
           <label className="text-xs text-ink-soft">Email</label>
           <input value={profile.email} disabled className={inputClass} />
-          <p className="text-xs text-ink-soft">Non modifiable pour l’instant.</p>
+          <div className="flex items-center gap-1.5 text-xs">
+            {profile.emailVerified ? (
+              <>
+                <CheckCircle2 size={13} className="text-deal-down" />
+                <span className="text-ink-soft">Email vérifié</span>
+              </>
+            ) : (
+              <>
+                <CircleAlert size={13} className="text-deal-up" />
+                <span className="text-ink-soft">Non vérifié —</span>
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={isResending}
+                  className="font-medium text-ink underline transition hover:text-brand-600 disabled:opacity-40"
+                >
+                  {isResending ? 'Envoi…' : 'renvoyer l’email'}
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <button
