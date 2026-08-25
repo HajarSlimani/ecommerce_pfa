@@ -13,6 +13,22 @@ import java.util.List;
 public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
 
     /**
+     * Éligibilité à laisser un avis : au moins une commande de ce produit,
+     * par cet utilisateur, dans un statut ≥ SHIPPED (SHIPPED ou DELIVERED).
+     * Voir com.ecommerce.avis.service.ReviewService#canReview.
+     */
+    @Query("""
+            SELECT COUNT(oi) > 0
+            FROM OrderItem oi
+            WHERE oi.productId = :productId
+              AND oi.order.userId = :userId
+              AND oi.order.status IN :statuses
+            """)
+    boolean existsShippedOrderForProduct(@Param("productId") Long productId,
+                                          @Param("userId") Long userId,
+                                          @Param("statuses") List<OrderStatus> statuses);
+
+    /**
      * Uniquement les commandes réellement payées (:statuses) — une commande
      * PENDING n'a pas encore été payée, une CANCELLED a vu son stock restauré,
      * ni l'une ni l'autre ne doit compter comme une "vente".

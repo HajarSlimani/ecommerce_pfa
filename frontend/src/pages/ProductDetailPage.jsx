@@ -3,8 +3,11 @@ import { useParams, Link } from 'react-router-dom'
 import { ShieldCheck, RotateCcw, Truck, Minus, Plus } from 'lucide-react'
 import { useProductDetail } from '../hooks/useProducts'
 import { useCart } from '../hooks/useCart'
+import { useRatingSummary } from '../hooks/useReviews'
 import { CATEGORIES } from '../constants/catalogue'
 import GradeSelector from '../components/catalogue/GradeSelector'
+import StarRating from '../components/catalogue/StarRating'
+import ReviewsSection from '../components/catalogue/ReviewsSection'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import ErrorBanner from '../components/common/ErrorBanner'
 
@@ -17,6 +20,7 @@ const TRUST_ROW = [
 export default function ProductDetailPage() {
   const { id } = useParams()
   const { data, isLoading, isError } = useProductDetail(Number(id))
+  const { data: ratingSummary } = useRatingSummary(Number(id))
   const { addItem, isAdding } = useCart()
   const [selectedGrade, setSelectedGrade] = useState(null)
   const [selectedColor, setSelectedColor] = useState(null)
@@ -105,6 +109,14 @@ export default function ProductDetailPage() {
         <div className="flex flex-col">
           <span className="eyebrow">{product.brand}</span>
           <h1 className="mt-2 font-display text-3xl font-medium text-ink sm:text-4xl">{product.name}</h1>
+          {ratingSummary && ratingSummary.reviewCount > 0 && (
+            <div className="mt-2 flex items-center gap-2">
+              <StarRating value={ratingSummary.averageRating} size={14} />
+              <span className="text-xs text-ink-soft">
+                {ratingSummary.averageRating.toFixed(1)} ({ratingSummary.reviewCount} avis)
+              </span>
+            </div>
+          )}
           <p className="mt-4 max-w-md text-sm leading-relaxed text-ink-soft">{product.description}</p>
 
           <div className="mt-9 border-t border-line pt-1">
@@ -175,6 +187,8 @@ export default function ProductDetailPage() {
           </div>
         </div>
       </div>
+
+      <ReviewsSection productId={product.id} />
     </div>
   )
 }
