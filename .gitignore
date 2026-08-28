@@ -13,3 +13,8 @@ dist/
 *.log
 .DS_Store
 *.patch
+# Chatbot RAG (chatbot-service/)
+chatbot-service/venv/
+chatbot-service/.env
+chatbot-service/chroma_data/
+chatbot-service/**/__pycache__/

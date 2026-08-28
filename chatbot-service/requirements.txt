@@ -1,0 +1,19 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+pydantic-settings==2.5.2
+python-dotenv==1.0.1
+
+# Client officiel Groq (inférence LLM gratuite, hébergée — voir README).
+groq==0.11.0
+
+# Embeddings locaux : tournent sur CPU, aucune clé API nécessaire.
+# (sentence-transformers télécharge le modèle depuis Hugging Face au premier
+# lancement — connexion internet requise une seule fois, puis mise en cache.)
+sentence-transformers==3.1.1
+
+# Base vectorielle embarquée (fichier local, zéro service à lancer).
+chromadb>=0.5.15
+
+# Lecture du catalogue produit directement depuis Postgres.
+psycopg2-binary>=2.9.10
