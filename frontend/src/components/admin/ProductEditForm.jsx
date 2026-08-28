@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import toast from 'react-hot-toast'
+import { Package, Sparkles } from 'lucide-react'
 import { CATEGORIES } from '../../constants/catalogue'
 import { useCreateProduct, useUpdateProduct } from '../../hooks/useAdmin'
 
@@ -26,7 +27,7 @@ export default function ProductEditForm({ product, onCreated }) {
   }, [product])
 
   const inputClass =
-    'border border-line bg-transparent px-3 py-2.5 text-sm text-ink outline-none transition placeholder:text-ink-soft focus:border-ink'
+    'rounded-md border border-line bg-transparent px-3 py-2.5 text-sm text-ink outline-none transition placeholder:text-ink-soft focus:border-brand-300 focus:ring-2 focus:ring-brand-100'
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -53,8 +54,16 @@ export default function ProductEditForm({ product, onCreated }) {
   const isPending = createProduct.isPending || updateProduct.isPending
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4 border border-line bg-surface p-6">
-      <p className="eyebrow">{isEditing ? 'Modifier le produit' : 'Nouveau produit'}</p>
+    <form
+      onSubmit={handleSubmit}
+      className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-6 shadow-admin-sm"
+    >
+      <div className="flex items-center gap-2">
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-50 text-brand-600">
+          {isEditing ? <Package size={13} /> : <Sparkles size={13} />}
+        </span>
+        <p className="eyebrow">{isEditing ? 'Modifier le produit' : 'Nouveau produit'}</p>
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
@@ -101,12 +110,17 @@ export default function ProductEditForm({ product, onCreated }) {
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-xs text-ink-soft">Image par défaut (URL)</label>
-          <input
-            value={form.imageUrl}
-            onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
-            placeholder="https://…"
-            className={inputClass}
-          />
+          <div className="flex items-center gap-2">
+            <div className="h-9 w-9 shrink-0 overflow-hidden rounded-md border border-line bg-surface-muted">
+              {form.imageUrl && <img src={form.imageUrl} alt="" className="h-full w-full object-cover" />}
+            </div>
+            <input
+              value={form.imageUrl}
+              onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
+              placeholder="https://…"
+              className={`w-full ${inputClass}`}
+            />
+          </div>
         </div>
       </div>
 

@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { TrendingUp, Sparkles, Wallet, Calculator } from 'lucide-react'
 import { usePricingImpact, usePricingHistory } from '../../hooks/usePricing'
+import PageHeader from '../../components/admin/PageHeader'
 import KpiCard from '../../components/admin/KpiCard'
 import DateRangePicker from '../../components/admin/DateRangePicker'
 import RevenueImpactChart from '../../components/admin/RevenueImpactChart'
@@ -23,25 +25,26 @@ export default function AdminPricingDynamicsPage() {
 
   return (
     <div>
-      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="eyebrow mb-3">Administration</p>
-          <h1 className="font-display text-3xl font-medium text-ink">Pricing Dynamique</h1>
-        </div>
-        <DateRangePicker from={range.from} to={range.to} onChange={setRange} />
-      </div>
+      <PageHeader
+        icon={TrendingUp}
+        title="Pricing Dynamique"
+        description="Impact du moteur de tarification ML sur la période sélectionnée."
+        actions={<DateRangePicker from={range.from} to={range.to} onChange={setRange} />}
+      />
 
       {impactLoading ? (
-        <LoadingSpinner label="Calcul de l'impact revenu…" />
+        <div className="mt-8"><LoadingSpinner label="Calcul de l'impact revenu…" /></div>
       ) : (
-        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <KpiCard label="Ajustements sur la période" value={impact?.totalAdjustments ?? 0} />
+        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <KpiCard icon={Sparkles} label="Ajustements sur la période" value={impact?.totalAdjustments ?? 0} />
           <KpiCard
+            icon={Wallet}
             label="Impact revenu estimé (cumulé)"
             value={formatCurrency(impact?.totalEstimatedRevenueImpact ?? 0)}
             accent={(impact?.totalEstimatedRevenueImpact ?? 0) >= 0 ? 'down' : 'up'}
           />
           <KpiCard
+            icon={Calculator}
             label="Impact moyen / ajustement"
             value={formatCurrency(impact?.averageImpactPerAdjustment ?? 0)}
           />
@@ -49,9 +52,11 @@ export default function AdminPricingDynamicsPage() {
       )}
 
       {historyLoading ? (
-        <LoadingSpinner label="Chargement de la tendance…" />
+        <div className="mt-8"><LoadingSpinner label="Chargement de la tendance…" /></div>
       ) : (
-        <RevenueImpactChart historyEntries={history?.content} />
+        <div className="mt-8">
+          <RevenueImpactChart historyEntries={history?.content} />
+        </div>
       )}
     </div>
   )

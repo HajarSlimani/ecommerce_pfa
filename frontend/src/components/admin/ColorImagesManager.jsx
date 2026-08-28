@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import toast from 'react-hot-toast'
+import { Palette } from 'lucide-react'
 import { useSetColorImage } from '../../hooks/useAdmin'
 
 export default function ColorImagesManager({ productId, colorImages }) {
@@ -8,6 +9,9 @@ export default function ColorImagesManager({ productId, colorImages }) {
   const setColorImage = useSetColorImage()
 
   const entries = Object.entries(colorImages || {})
+
+  const inputClass =
+    'rounded-md border border-line bg-transparent px-3 py-2 text-sm text-ink outline-none transition placeholder:text-ink-soft focus:border-brand-300 focus:ring-2 focus:ring-brand-100'
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -25,8 +29,13 @@ export default function ColorImagesManager({ productId, colorImages }) {
   }
 
   return (
-    <div className="border border-line bg-surface p-6">
-      <p className="eyebrow">Photos par couleur</p>
+    <div className="rounded-lg border border-line bg-surface p-6 shadow-admin-sm">
+      <div className="flex items-center gap-2">
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-50 text-brand-600">
+          <Palette size={13} />
+        </span>
+        <p className="eyebrow">Photos par couleur</p>
+      </div>
       <p className="mt-1.5 text-xs leading-relaxed text-ink-soft">
         Le grade n’affecte pas la photo, seule la couleur compte. Une couleur sans photo ici
         retombe sur l’image par défaut du produit.
@@ -35,8 +44,8 @@ export default function ColorImagesManager({ productId, colorImages }) {
       {entries.length > 0 && (
         <div className="mt-5 grid grid-cols-3 gap-3 sm:grid-cols-4">
           {entries.map(([c, url]) => (
-            <div key={c} className="flex flex-col gap-1.5">
-              <div className="aspect-square overflow-hidden border border-line bg-surface-muted">
+            <div key={c} className="group flex flex-col gap-1.5">
+              <div className="aspect-square overflow-hidden rounded-md border border-line bg-surface-muted transition-shadow group-hover:shadow-admin-sm">
                 <img src={url} alt={c} className="h-full w-full object-cover" />
               </div>
               <span className="truncate text-xs text-ink-soft">{c}</span>
@@ -45,7 +54,7 @@ export default function ColorImagesManager({ productId, colorImages }) {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="mt-5 flex flex-wrap items-end gap-3">
+      <form onSubmit={handleSubmit} className="mt-5 flex flex-wrap items-end gap-3 border-t border-line pt-5">
         <div className="flex flex-col gap-1.5">
           <label className="text-xs text-ink-soft">Couleur</label>
           <input
@@ -53,7 +62,7 @@ export default function ColorImagesManager({ productId, colorImages }) {
             value={color}
             onChange={(e) => setColor(e.target.value)}
             placeholder="ex. Bleu"
-            className="w-32 border border-line bg-transparent px-3 py-2 text-sm text-ink outline-none focus:border-ink"
+            className={`w-32 ${inputClass}`}
           />
         </div>
         <div className="flex flex-1 flex-col gap-1.5">
@@ -63,7 +72,7 @@ export default function ColorImagesManager({ productId, colorImages }) {
             value={imageUrl}
             onChange={(e) => setImageUrl(e.target.value)}
             placeholder="https://…"
-            className="w-full border border-line bg-transparent px-3 py-2 text-sm text-ink outline-none focus:border-ink"
+            className={`w-full ${inputClass}`}
           />
         </div>
         <button

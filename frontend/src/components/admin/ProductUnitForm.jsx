@@ -10,7 +10,7 @@ export default function ProductUnitForm({ productId }) {
   const addUnit = useAddUnit()
 
   const inputClass =
-    'border border-line bg-transparent px-3 py-2 text-sm text-ink outline-none transition placeholder:text-ink-soft focus:border-ink'
+    'rounded-md border border-line bg-transparent px-3 py-2 text-sm text-ink outline-none transition placeholder:text-ink-soft focus:border-brand-300 focus:ring-2 focus:ring-brand-100'
 
   const handleSubmit = (e) => {
     e.preventDefault()

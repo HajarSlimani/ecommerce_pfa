@@ -6,10 +6,10 @@ export const CATEGORIES = [
 ]
 
 export const UNIT_STATUS = {
-  AVAILABLE: { label: 'Disponible', className: 'text-deal-down' },
-  SOLD: { label: 'Vendue', className: 'text-ink-soft' },
-  RETURNED: { label: 'Retournée', className: 'text-brand-600' },
-  DEFECTIVE: { label: 'Défectueuse', className: 'text-deal-up' },
+  AVAILABLE: { label: 'Disponible', className: 'text-deal-down', badgeClassName: 'bg-deal-down/10 text-deal-down border-deal-down/20' },
+  SOLD: { label: 'Vendue', className: 'text-ink-soft', badgeClassName: 'bg-surface-sunken text-ink-soft border-line' },
+  RETURNED: { label: 'Retournée', className: 'text-brand-600', badgeClassName: 'bg-brand-50 text-brand-600 border-brand-100' },
+  DEFECTIVE: { label: 'Défectueuse', className: 'text-deal-up', badgeClassName: 'bg-deal-up/10 text-deal-up border-deal-up/20' },
 }
 
 export const GRADES = [

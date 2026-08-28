@@ -9,6 +9,7 @@ import {
   Legend,
   ReferenceLine,
 } from 'recharts'
+import { LineChart as LineChartIcon } from 'lucide-react'
 import { formatCurrency } from '../../utils/formatCurrency'
 import { formatDate } from '../../utils/formatDate'
 
@@ -41,15 +42,20 @@ export default function RevenueImpactChart({ historyEntries }) {
 
   if (data.length === 0) {
     return (
-      <div className="flex h-72 items-center justify-center border border-line bg-surface text-sm text-ink-soft">
+      <div className="flex h-72 items-center justify-center rounded-lg border border-line bg-surface text-sm text-ink-soft shadow-admin-sm">
         Pas encore assez d’ajustements pour tracer une tendance.
       </div>
     )
   }
 
   return (
-    <div className="border border-line bg-surface p-5">
-      <h3 className="mb-1 font-display text-base font-medium text-ink">Impact revenu cumulé — dynamique vs statique</h3>
+    <div className="rounded-lg border border-line bg-surface p-5 shadow-admin-sm">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-50 text-brand-600">
+          <LineChartIcon size={13} />
+        </span>
+        <h3 className="font-display text-base font-medium text-ink">Impact revenu cumulé — dynamique vs statique</h3>
+      </div>
       <p className="mb-4 text-xs text-ink-soft">
         Le scénario statique correspond à une absence d’ajustement de prix (référence à 0).
       </p>
