@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { Package } from 'lucide-react'
 import { useProducts, useProductDetail } from '../../hooks/useProducts'
+import PageHeader from '../../components/admin/PageHeader'
 import AdminProductList from '../../components/admin/AdminProductList'
 import ProductEditForm from '../../components/admin/ProductEditForm'
 import ColorImagesManager from '../../components/admin/ColorImagesManager'
@@ -28,13 +30,11 @@ export default function AdminProductsPage() {
 
   return (
     <div>
-      <p className="eyebrow mb-3">Administration</p>
-      <h1 className="font-display text-3xl font-medium text-ink">Produits</h1>
-      {q && (
-        <p className="mt-2 text-sm text-ink-soft">
-          Résultats pour « {searchParams.get('q')} » ({products.length})
-        </p>
-      )}
+      <PageHeader
+        icon={Package}
+        title="Produits"
+        description={q ? `Résultats pour « ${searchParams.get('q')} » (${products.length})` : 'Catalogue, unités et images par couleur.'}
+      />
 
       <div className="mt-8 flex gap-8">
         {isListLoading ? (

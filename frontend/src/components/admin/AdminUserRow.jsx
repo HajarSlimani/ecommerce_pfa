@@ -3,6 +3,7 @@ import toast from 'react-hot-toast'
 import { Pencil, Trash2, Check, X } from 'lucide-react'
 import { formatDate } from '../../utils/formatDate'
 import { useUpdateUser, useDeleteUser } from '../../hooks/useAdmin'
+import AdminAvatar from './AdminAvatar'
 
 export default function AdminUserRow({ user, isSelf }) {
   const [isEditing, setIsEditing] = useState(false)
@@ -49,14 +50,14 @@ export default function AdminUserRow({ user, isSelf }) {
         <input
           value={fullName}
           onChange={(e) => setFullName(e.target.value)}
-          className="border border-line bg-surface px-2 py-1 text-sm text-ink outline-none focus:border-ink"
+          className="rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100"
         />
         <select
           value={role}
           disabled={isSelf}
           title={isSelf ? 'Tu ne peux pas retirer ton propre rôle admin' : undefined}
           onChange={(e) => setRole(e.target.value)}
-          className="border border-line bg-surface px-2 py-1 text-xs uppercase tracking-wide text-ink outline-none focus:border-ink disabled:opacity-50"
+          className="rounded-md border border-line bg-surface px-2 py-1 text-xs uppercase tracking-wide text-ink outline-none transition focus:border-brand-300 disabled:opacity-50"
         >
           <option value="CLIENT">Client</option>
           <option value="ADMIN">Admin</option>
@@ -75,11 +76,22 @@ export default function AdminUserRow({ user, isSelf }) {
   }
 
   return (
-    <div className="grid grid-cols-[1fr_1fr_100px_140px_90px] items-center gap-4 border-b border-line px-4 py-3 text-sm last:border-b-0">
-      <span className="truncate text-ink">{user.email}</span>
+    <div className="grid grid-cols-[1fr_1fr_100px_140px_90px] items-center gap-4 border-b border-line px-4 py-3 text-sm transition-colors last:border-b-0 hover:bg-surface-muted/40">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <AdminAvatar email={user.email} fullName={user.fullName} size={24} />
+        <span className="truncate text-ink">{user.email}</span>
+      </div>
       <span className="truncate text-ink-soft">{user.fullName || '—'}</span>
-      <span className={`text-xs font-medium uppercase tracking-wide ${user.role === 'ADMIN' ? 'text-brand-600' : 'text-ink-soft'}`}>
-        {user.role === 'ADMIN' ? 'Admin' : 'Client'}
+      <span>
+        <span
+          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide ${
+            user.role === 'ADMIN'
+              ? 'border-brand-100 bg-brand-50 text-brand-600'
+              : 'border-line bg-surface-sunken text-ink-soft'
+          }`}
+        >
+          {user.role === 'ADMIN' ? 'Admin' : 'Client'}
+        </span>
       </span>
       <span className="text-xs text-ink-soft">{formatDate(user.createdAt)}</span>
 

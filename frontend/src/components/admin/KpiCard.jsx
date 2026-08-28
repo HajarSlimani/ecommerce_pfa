@@ -6,7 +6,7 @@ import { ArrowUp, ArrowDown } from 'lucide-react'
  * "+∞%" quand la semaine précédente n'a aucune donnée) — dans ce cas on
  * affiche juste rien plutôt qu'un chiffre trompeur.
  */
-export default function KpiCard({ label, value, accent = 'ink', trend }) {
+export default function KpiCard({ icon: Icon, label, value, accent = 'ink', trend }) {
   const accentClasses = {
     ink: 'text-ink',
     up: 'text-deal-up',
@@ -20,17 +20,24 @@ export default function KpiCard({ label, value, accent = 'ink', trend }) {
   // comme "positif = vert, négatif = rouge" pour une tendance business.
 
   return (
-    <div className="border border-line bg-surface p-5">
-      <div className="eyebrow">{label}</div>
-      <div className="mt-3 flex items-end justify-between gap-2">
+    <div className="group border border-line bg-surface p-5 transition-shadow hover:shadow-admin-md">
+      <div className="flex items-center justify-between">
+        <div className="eyebrow">{label}</div>
+        {Icon && (
+          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-surface-muted text-ink-soft transition-colors group-hover:bg-brand-50 group-hover:text-brand-600">
+            <Icon size={13} strokeWidth={1.8} />
+          </span>
+        )}
+      </div>
+      <div className="mt-4 flex items-end justify-between gap-2">
         <div className={`tabular-price font-display text-2xl font-medium ${accentClasses[accent]}`}>{value}</div>
         {hasTrend && (
           <div
-            className={`mb-1 flex items-center gap-0.5 text-xs font-medium ${
-              isPositive ? 'text-deal-down' : 'text-deal-up'
+            className={`mb-0.5 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-medium ${
+              isPositive ? 'bg-deal-down/10 text-deal-down' : 'bg-deal-up/10 text-deal-up'
             }`}
           >
-            {isPositive ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+            {isPositive ? <ArrowUp size={11} /> : <ArrowDown size={11} />}
             {Math.abs(trend).toFixed(1)}%
           </div>
         )}

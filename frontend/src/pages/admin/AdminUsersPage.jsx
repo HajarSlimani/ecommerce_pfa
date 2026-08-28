@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { Users } from 'lucide-react'
 import { useAdminUsers } from '../../hooks/useAdmin'
 import { useAuth } from '../../hooks/useAuth'
+import PageHeader from '../../components/admin/PageHeader'
 import AdminUserRow from '../../components/admin/AdminUserRow'
 import Pagination from '../../components/common/Pagination'
 import LoadingSpinner from '../../components/common/LoadingSpinner'
@@ -13,15 +15,14 @@ export default function AdminUsersPage() {
 
   return (
     <div>
-      <p className="eyebrow mb-3">Administration</p>
-      <h1 className="font-display text-3xl font-medium text-ink">Utilisateurs</h1>
+      <PageHeader icon={Users} title="Utilisateurs" description="Comptes clients et administrateurs de la plateforme." />
 
       {isLoading && <div className="mt-8"><LoadingSpinner label="Chargement des utilisateurs…" /></div>}
       {isError && <div className="mt-8"><ErrorBanner message="Impossible de charger les utilisateurs." /></div>}
 
       {data && (
-        <div className="mt-8 border border-line bg-surface">
-          <div className="grid grid-cols-[1fr_1fr_100px_140px_90px] gap-4 border-b border-line px-4 py-3 text-xs font-medium uppercase tracking-wide text-ink-soft">
+        <div className="mt-8 overflow-hidden rounded-lg border border-line bg-surface shadow-admin-sm">
+          <div className="grid grid-cols-[1fr_1fr_100px_140px_90px] gap-4 border-b border-line bg-surface-muted/60 px-4 py-3 text-xs font-medium uppercase tracking-wide text-ink-soft">
             <span>Email</span>
             <span>Nom</span>
             <span>Rôle</span>

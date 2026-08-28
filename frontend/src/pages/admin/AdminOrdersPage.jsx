@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import toast from 'react-hot-toast'
+import { ShoppingBag } from 'lucide-react'
 import { useAdminOrders, useUpdateOrderStatus } from '../../hooks/useAdmin'
 import { formatDate } from '../../utils/formatDate'
+import PageHeader from '../../components/admin/PageHeader'
 import PriceTag from '../../components/common/PriceTag'
 import Pagination from '../../components/common/Pagination'
 import LoadingSpinner from '../../components/common/LoadingSpinner'
@@ -24,15 +26,14 @@ export default function AdminOrdersPage() {
 
   return (
     <div>
-      <p className="eyebrow mb-3">Administration</p>
-      <h1 className="font-display text-3xl font-medium text-ink">Commandes</h1>
+      <PageHeader icon={ShoppingBag} title="Commandes" description="Suivi et transitions de statut des commandes." />
 
       {isLoading && <LoadingSpinner label="Chargement des commandes…" />}
       {isError && <ErrorBanner message="Impossible de charger les commandes." />}
 
       {data && (
-        <div className="mt-8 border border-line bg-surface">
-          <div className="grid grid-cols-[80px_1fr_120px_100px_110px_140px] gap-4 border-b border-line px-4 py-3 text-xs font-medium uppercase tracking-wide text-ink-soft">
+        <div className="mt-8 overflow-hidden rounded-lg border border-line bg-surface shadow-admin-sm">
+          <div className="grid grid-cols-[80px_1fr_120px_100px_110px_180px] gap-4 border-b border-line bg-surface-muted/60 px-4 py-3 text-xs font-medium uppercase tracking-wide text-ink-soft">
             <span>Commande</span>
             <span>Client</span>
             <span>Articles</span>
@@ -44,7 +45,7 @@ export default function AdminOrdersPage() {
           {data.content.map((order) => (
             <div
               key={order.id}
-              className="grid grid-cols-[80px_1fr_120px_100px_110px_140px] items-center gap-4 border-b border-line px-4 py-3 text-sm last:border-b-0"
+              className="grid grid-cols-[80px_1fr_120px_100px_110px_180px] items-center gap-4 border-b border-line px-4 py-3 text-sm transition-colors last:border-b-0 hover:bg-surface-muted/40"
             >
               <span className="font-mono text-ink">#{order.id}</span>
               <span className="truncate text-ink-soft">{order.userEmail}</span>

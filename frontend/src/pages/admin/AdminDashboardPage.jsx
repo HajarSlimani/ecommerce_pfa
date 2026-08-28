@@ -7,6 +7,8 @@ import {
   useRecentUsers,
 } from '../../hooks/useAdmin'
 import { formatCurrency } from '../../utils/formatCurrency'
+import { LayoutDashboard, Package, Wallet, ShoppingBag, Clock, Users as UsersIcon } from 'lucide-react'
+import PageHeader from '../../components/admin/PageHeader'
 import KpiCard from '../../components/admin/KpiCard'
 import OrderStatusBreakdown from '../../components/admin/OrderStatusBreakdown'
 import LowStockAlert from '../../components/admin/LowStockAlert'
@@ -27,8 +29,7 @@ export default function AdminDashboardPage() {
 
   return (
     <div>
-      <p className="eyebrow mb-3">Administration</p>
-      <h1 className="font-display text-3xl font-medium text-ink">Dashboard</h1>
+      <PageHeader icon={LayoutDashboard} title="Dashboard" description="Vue d'ensemble de l'activité de la boutique." />
 
       {isLoading && <div className="mt-8"><LoadingSpinner label="Chargement…" /></div>}
       {isError && <div className="mt-8"><ErrorBanner message="Impossible de charger les statistiques." /></div>}
@@ -36,15 +37,21 @@ export default function AdminDashboardPage() {
       {stats && (
         <>
           <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <KpiCard label="Produits" value={stats.totalProducts} />
-            <KpiCard label="Revenu total" value={formatCurrency(stats.totalRevenue)} trend={stats.revenueTrendPct} />
-            <KpiCard label="Commandes" value={stats.totalOrders} trend={stats.ordersTrendPct} />
+            <KpiCard icon={Package} label="Produits" value={stats.totalProducts} />
             <KpiCard
+              icon={Wallet}
+              label="Revenu total"
+              value={formatCurrency(stats.totalRevenue)}
+              trend={stats.revenueTrendPct}
+            />
+            <KpiCard icon={ShoppingBag} label="Commandes" value={stats.totalOrders} trend={stats.ordersTrendPct} />
+            <KpiCard
+              icon={Clock}
               label="Commandes en attente"
               value={stats.pendingOrders}
               accent={stats.pendingOrders > 0 ? 'up' : 'ink'}
             />
-            <KpiCard label="Utilisateurs" value={stats.totalUsers} trend={stats.usersTrendPct} />
+            <KpiCard icon={UsersIcon} label="Utilisateurs" value={stats.totalUsers} trend={stats.usersTrendPct} />
           </div>
 
           <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">

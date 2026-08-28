@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Search, User } from 'lucide-react'
+import { Search, LogOut, ChevronDown } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
+import AdminAvatar from './AdminAvatar'
 
 export default function AdminHeader() {
   const { user, logout } = useAuth()
@@ -32,34 +33,37 @@ export default function AdminHeader() {
   }
 
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-line bg-surface px-6">
-      <form onSubmit={handleSearch} className="flex items-center gap-2 text-ink-soft">
-        <Search size={16} strokeWidth={1.6} />
+    <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-line bg-surface/80 px-6 backdrop-blur-sm">
+      <form
+        onSubmit={handleSearch}
+        className="flex w-72 items-center gap-2 rounded-full border border-line bg-surface-muted px-3.5 py-2 text-ink-soft transition focus-within:border-brand-300 focus-within:bg-surface focus-within:ring-2 focus-within:ring-brand-100"
+      >
+        <Search size={15} strokeWidth={1.8} />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Rechercher un produit…"
-          className="w-64 bg-transparent text-sm text-ink placeholder:text-ink-soft focus:outline-none"
+          className="w-full bg-transparent text-sm text-ink placeholder:text-ink-soft focus:outline-none"
         />
       </form>
 
       <div ref={menuRef} className="relative">
         <button
           onClick={() => setMenuOpen((o) => !o)}
-          className="flex items-center gap-2 text-sm text-ink"
+          className="flex items-center gap-2.5 rounded-full py-1 pl-1 pr-2.5 text-sm text-ink transition hover:bg-surface-muted"
           aria-expanded={menuOpen}
         >
-          <span className="flex h-7 w-7 items-center justify-center border border-line text-ink-soft">
-            <User size={14} strokeWidth={1.6} />
-          </span>
+          <AdminAvatar email={user?.email} fullName={user?.fullName} />
           <span className="hidden sm:inline">{user?.email}</span>
+          <ChevronDown size={14} className={`text-ink-soft transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
         </button>
         {menuOpen && (
-          <div className="absolute right-0 top-full mt-2 w-44 border border-line bg-white py-2 shadow-sm">
+          <div className="absolute right-0 top-full mt-2 w-48 overflow-hidden rounded-lg border border-line bg-white py-1.5 shadow-admin-md">
             <button
               onClick={handleLogout}
-              className="block w-full px-4 py-2 text-left text-sm text-ink hover:bg-surface-muted"
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-ink transition hover:bg-surface-muted"
             >
+              <LogOut size={14} strokeWidth={1.8} />
               Déconnexion
             </button>
           </div>

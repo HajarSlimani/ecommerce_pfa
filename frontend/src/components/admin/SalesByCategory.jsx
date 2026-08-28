@@ -11,18 +11,21 @@ export default function SalesByCategory({ data }) {
       {data.length === 0 ? (
         <p className="mt-4 text-sm text-ink-soft">Pas encore de vente confirmée.</p>
       ) : (
-        <div className="mt-4 flex flex-col gap-3">
+        <div className="mt-4 flex flex-col gap-3.5">
           {data.map((c) => {
             const label = CATEGORIES.find((cat) => cat.id === c.category)?.label || c.category
             const pct = (Number(c.revenue) / maxRevenue) * 100
             return (
               <div key={c.category}>
-                <div className="mb-1 flex items-center justify-between text-xs">
+                <div className="mb-1.5 flex items-center justify-between text-xs">
                   <span className="text-ink">{label}</span>
                   <PriceTag price={c.revenue} size="sm" />
                 </div>
-                <div className="h-1.5 w-full bg-surface-sunken">
-                  <div className="h-full bg-brand-500" style={{ width: `${pct}%` }} />
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-sunken">
+                  <div
+                    className="h-full rounded-full bg-brand-500 transition-[width] duration-500 ease-out"
+                    style={{ width: `${pct}%` }}
+                  />
                 </div>
               </div>
             )
