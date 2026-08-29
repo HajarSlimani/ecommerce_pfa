@@ -3,6 +3,7 @@ import { Routes, Route, useLocation } from 'react-router-dom'
 import Navbar from '../components/common/Navbar'
 import Footer from '../components/common/Footer'
 import EmailVerificationBanner from '../components/common/EmailVerificationBanner'
+import ChatWidget from '../components/chat/ChatWidget'
 import ProtectedRoute from '../components/common/ProtectedRoute'
 import AdminRoute from '../components/common/AdminRoute'
 
@@ -99,6 +100,7 @@ export default function AppRouter() {
         </Routes>
       </div>
       {!isAdminRoute && <Footer />}
+      {!isAdminRoute && <ChatWidget />}
     </div>
   )
 }
